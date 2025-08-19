@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Regular n-gon — CSV-driven names</title>
+  <title>Regular n-gon — Clean Refactor</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     :root {
@@ -11,73 +11,131 @@
       --legend-w: 340;
       --font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     }
-    html, body { height: 100%; margin: 0; }
-    body { display: grid; place-items: center; background: #fff; }
-    svg { width: calc(var(--w) * 1px); height: calc(var(--h) * 1px); font: var(--font); }
-    .menu text { cursor: pointer; fill: #111; }
-    .menu text.active { fill: #c00; font-weight: 600; }
-    .spoke { stroke: #ddd; stroke-width: 1; shape-rendering: crispEdges; }
-    .edge  { stroke: #c00; stroke-width: 1.5; shape-rendering: crispEdges; }
-    .arc   { fill: none; stroke: #333; stroke-width: 1; }
-    .label { fill: #000; font-size: 11px; user-select: none; pointer-events: none; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background: #fff;
+    }
+    svg {
+      width: calc(var(--w) * 1px);
+      height: calc(var(--h) * 1px);
+      font: var(--font);
+    }
+    .menu text {
+      cursor: pointer;
+      fill: #111;
+    }
+    .menu text.active {
+      fill: #c00;
+      font-weight: 600;
+    }
+    .spoke {
+      stroke: #ddd;
+      stroke-width: 1;
+      shape-rendering: crispEdges;
+    }
+    .edge {
+      stroke: #c00;
+      stroke-width: 1.5;
+      shape-rendering: crispEdges;
+    }
+    .arc {
+      fill: none;
+      stroke: #333;
+      stroke-width: 1;
+    }
+    .label {
+      fill: #000;
+      font-size: 11px;
+      user-select: none;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <svg viewBox="0 0 960 520" aria-label="Regular polygon visualizer"></svg>
 
   <script>
-    // ---------- helpers ----------
+    // -------------------------------
+    // Small geometry helpers
+    // -------------------------------
     const rad = d => d * Math.PI / 180;
+    const deg = r => r * 180 / Math.PI;
+    const polar = (R, theta) => [R * Math.cos(theta), R * Math.sin(theta)];
     const arcPath = ({rInner, rWidth = 1, a0, a1}) =>
-      d3.arc()({ innerRadius: rInner, outerRadius: rInner + rWidth, startAngle: a0, endAngle: a1 });
+      d3.arc()({
+        innerRadius: rInner,
+        outerRadius: rInner + rWidth,
+        startAngle: a0,
+        endAngle: a1
+      });
 
-    // ---------- layout ----------
+    // -------------------------------
+    // Data: polygon names (3..20)
+    // -------------------------------
+    const polyName = n => ({
+      3:"Triangle",4:"Square",5:"Pentagon",6:"Hexagon",7:"Heptagon",
+      8:"Octagon",9:"Nonagon",10:"Decagon",11:"Hendecagon",12:"Dodecagon",
+      13:"Triskaidecagon",14:"Tetrakaidecagon",15:"Pentadecagon",
+      16:"Hexadecagon",17:"Heptadecagon",18:"Octadecagon",19:"Enneadecagon",
+      20:"Icosagon"
+    }[n] || `${n}-gon`);
+
+    const menuData = d3.range(3, 21).map(n => ({ n, name: polyName(n) }));
+
+    // -------------------------------
+    // Layout + persistent selections
+    // -------------------------------
     const W = 960, H = 520, LEGEND_W = 340;
     const cx = (W - LEGEND_W) / 2, cy = H / 2;
-    const R  = 150;
+    const R = 150; // radial length for each spoke/edge baseline
 
     const svg = d3.select("svg");
-    const gMain  = svg.append("g").attr("transform", `translate(${cx},${cy})`);
-    const gMenu  = svg.append("g").attr("class", "menu");
-    const gSpokes= gMain.append("g").attr("class", "spokes");
-    const gEdges = gMain.append("g").attr("class", "edges");
-    const gArcs  = gMain.append("g").attr("class", "arcs");
-    const gLabels= gMain.append("g").attr("class", "labels");
+    const gMain = svg.append("g").attr("transform", `translate(${cx},${cy})`);
+    const gMenu = svg.append("g").attr("class", "menu")
+      .attr("transform", `translate(${W - LEGEND_W},${(H - menuData.length*14)/2})`);
+    const gSpokes = gMain.append("g").attr("class", "spokes");
+    const gEdges  = gMain.append("g").attr("class", "edges");
+    const gArcs   = gMain.append("g").attr("class", "arcs");
+    const gLabels = gMain.append("g").attr("class", "labels");
 
-    // ---------- state ----------
-    const state = { n: 10, menu: [] };
-    let menuSel = null;
+    // -------------------------------
+    // State
+    // -------------------------------
+    const state = { n: 10 }; // initial decagon
 
-    // ---------- rendering ----------
-    function renderMenu() {
-      const lineH = 14;
-      gMenu.attr("transform", `translate(${W - LEGEND_W},${(H - state.menu.length * lineH)/2})`);
+    // -------------------------------
+    // Render menu (static enter once)
+    // -------------------------------
+    const menuSel = gMenu.selectAll("text")
+      .data(menuData)
+      .join("text")
+        .attr("x", 0)
+        .attr("y", (_, i) => i * 14)
+        .text(d => d.name)
+        .on("click", (_, d) => {
+          state.n = d.n;
+          render();
+        });
 
-      menuSel = gMenu.selectAll("text")
-        .data(state.menu, d => d.n)
-        .join(
-          enter => enter.append("text")
-            .attr("x", 0)
-            .attr("y", (_, i) => i * lineH)
-            .text(d => d.name)
-            .on("click", (_, d) => { state.n = d.n; renderEverything(); }),
-          update => update.text(d => d.name),
-          exit => exit.remove()
-        );
-
-      menuSel.classed("active", d => d.n === state.n);
-    }
-
-    function renderPolygon() {
+    // -------------------------------
+    // Core render
+    // -------------------------------
+    function render() {
+      // angles
       const n = state.n;
-      const a = 360 / n;
+      const a = 360 / n;                   // central angle in degrees
       const aRad = rad(a);
-      const aOut = (180 - a) / 2;
+      const aOut = (180 - a) / 2;          // exterior wedge (deg)
       const aOutRad = rad(aOut);
 
+      // ---- spokes: simple 0..n-1 with rotation
       const spokes = d3.range(n).map(i => ({ rot: i*a }));
-
-      // spokes
       gSpokes.selectAll("line")
         .data(spokes)
         .join("line")
@@ -86,7 +144,8 @@
           .attr("x2", R).attr("y2", 0)
           .attr("transform", d => `rotate(${d.rot})`);
 
-      // edges (segment to next vertex)
+      // ---- edges: for each spoke, a red segment to the next vertex
+      // Segment is from (R,0) to (R*cos aRad, -R*sin aRad) in local coords
       gEdges.selectAll("line")
         .data(spokes)
         .join("line")
@@ -96,36 +155,45 @@
           .attr("y2", -R*Math.sin(aRad))
           .attr("transform", d => `rotate(${d.rot})`);
 
-      // arcs
+      // ---- arcs: rebuilt fresh each time (few elements)
       gArcs.selectAll("*").remove();
+
+      // interior angle arc (at center): tiny tick from 90° down by aRad
       gArcs.append("path")
         .attr("class", "arc")
         .attr("d", arcPath({ rInner: R*0.20, rWidth: 1, a0: Math.PI/2, a1: Math.PI/2 - aRad }));
 
+      // two small ticks near the outer right corner to show the exterior angle
       const baseRight = `translate(${R},0)`;
       gArcs.append("path")
         .attr("class", "arc")
         .attr("d", arcPath({ rInner: R*0.18, rWidth: 1, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
         .attr("transform", baseRight);
+
       gArcs.append("path")
         .attr("class", "arc")
         .attr("d", arcPath({ rInner: R*0.18 + 2, rWidth: 1, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
         .attr("transform", baseRight);
 
+      // symmetric pair across the edge (rotated frame)
       const arcStart = 3 * Math.PI / 2;
       [0, 2, 4].forEach(delta => {
         gArcs.append("path")
           .attr("class", "arc")
           .attr("d", arcPath({
-            rInner: R*0.08 + delta, rWidth: 1,
-            a0: arcStart + aOutRad, a1: arcStart - aOutRad
+            rInner: R*0.08 + delta,
+            rWidth: 1,
+            a0: arcStart + aOutRad,
+            a1: arcStart - aOutRad
           }))
           .attr("transform", `rotate(${-a}),translate(${R},0)`);
       });
 
-      // labels
+      // ---- labels
       gLabels.selectAll("*").remove();
       const f = d3.format(".1f");
+
+      // center label: interior angle (a)
       gLabels.append("text")
         .attr("class", "label")
         .text(`${f(a)}°`)
@@ -133,6 +201,7 @@
         .attr("y", -R * 0.22 * Math.sin(aRad/2))
         .attr("text-anchor", "start");
 
+      // outer label: exterior angle (aOut)
       gLabels.append("text")
         .attr("class", "label")
         .text(`${f(aOut)}°`)
@@ -140,71 +209,27 @@
         .attr("y", -R*0.22 * Math.sin(aOutRad/2))
         .attr("text-anchor", "end");
 
+      // across-edge label: 2 * exterior
       gLabels.append("text")
         .attr("class", "label")
         .text(`${f(aOut*2)}°`)
         .attr("x",  R * (0.77 * Math.cos(aRad)))
         .attr("y", -R * 0.77 * Math.sin(aRad))
         .attr("text-anchor", "middle");
+
+      // ---- menu highlight
+      menuSel
+        .classed("active", d => d.n === n);
     }
 
-    function renderEverything() {
-      renderPolygon();
-      if (menuSel) menuSel.classed("active", d => d.n === state.n);
-    }
+    // optional: keyboard shortcuts (left/right to change n)
+    d3.select(window).on("keydown", (e) => {
+      if (e.key === "ArrowLeft")  { state.n = Math.max(3, state.n - 1); render(); }
+      if (e.key === "ArrowRight") { state.n = Math.min(20, state.n + 1); render(); }
+    });
 
-    // ---------- load CSV, then boot ----------
-    // CSV columns expected: n,name
-    // - n must be an integer (e.g., 3,4,5,...)
-    // - name is the display string for that n-gon
-    (async function init() {
-      try {
-        const rows = await d3.csv("polyNames.csv", d => ({
-          n: +d.n,
-          name: d.name?.trim() || `${d.n}-gon`
-        }));
-
-        // sanitize: keep only rows with valid n >= 3
-        state.menu = rows
-          .filter(r => Number.isFinite(r.n) && r.n >= 3)
-          // optional: sort by n ascending regardless of CSV order
-          .sort((a,b) => d3.ascending(a.n, b.n));
-
-        // choose initial n: prefer 10 if present, else first row
-        state.n = state.menu.some(d => d.n === 10) ? 10 : state.menu[0]?.n ?? 10;
-
-      } catch (err) {
-        console.error("Failed to load polyNames.csv; falling back to 3..20", err);
-        // fallback in case CSV fetch fails (e.g., running from file://)
-        const defaultName = n => ({
-          3:"Triangle",4:"Square",5:"Pentagon",6:"Hexagon",7:"Heptagon",
-          8:"Octagon",9:"Nonagon",10:"Decagon",11:"Hendecagon",12:"Dodecagon",
-          13:"Triskaidecagon",14:"Tetrakaidecagon",15:"Pentadecagon",
-          16:"Hexadecagon",17:"Heptadecagon",18:"Octadecagon",19:"Enneadecagon",
-          20:"Icosagon"
-        }[n] || `${n}-gon`);
-        state.menu = d3.range(3, 21).map(n => ({ n, name: defaultName(n) }));
-        state.n = 10;
-      }
-
-      renderMenu();
-      renderEverything();
-
-      // keyboard shortcuts
-      d3.select(window).on("keydown", (e) => {
-        if (e.key === "ArrowLeft")  {
-          // move to previous available n in the CSV-defined list
-          const idx = state.menu.findIndex(d => d.n === state.n);
-          if (idx > 0) { state.n = state.menu[idx - 1].n; renderEverything(); }
-        }
-        if (e.key === "ArrowRight") {
-          const idx = state.menu.findIndex(d => d.n === state.n);
-          if (idx >= 0 && idx < state.menu.length - 1) {
-            state.n = state.menu[idx + 1].n; renderEverything();
-          }
-        }
-      });
-    })();
+    // initial draw
+    render();
   </script>
 </body>
 </html>

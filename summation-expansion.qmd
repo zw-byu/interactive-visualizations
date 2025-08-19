@@ -1,0 +1,165 @@
+---
+title: "Interactive Math"
+format:
+  html:
+    number-sections: true
+    html-math-method: mathjax
+    include-in-header:
+      - text: |
+          <script>
+          window.MathJax = {
+            tex: {
+              tags: 'ams',
+              packages: {'[+]': ['html','color','textmacros']}
+            }
+          };
+          </script>
+---
+
+<style>
+.idx {
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s;
+}
+.idx.i-n:hover, .idx.i-n.hover { background-color: #ff00ff; color: #ffffff; }
+.idx.i-1:hover, .idx.i-1.hover { background-color: #52057B; color: #ffffff; }
+.idx.i-2:hover, .idx.i-2.hover { background-color: #892CDC; color: #ffffff;}
+.idx.i-3:hover, .idx.i-3.hover { background-color: #BC6FF1; color: #ffffff;}
+.idx.j-n:hover, .idx.j-n.hover { background-color: #1d631dff; color: #ffffff;}
+.idx.j-1:hover, .idx.j-1.hover { background-color: #3B5249; color: #ffffff;}
+.idx.j-2:hover, .idx.j-2.hover { background-color: #519872; color: #ffffff;}
+.idx.j-3:hover, .idx.j-3.hover { background-color: #7eb645; color: #ffffff;}
+</style>
+<style>
+/* utility to indicate interactivity (optional) */
+.idx { cursor: pointer; }
+
+/* soft highlight = 40-ish alpha, keep original text color */
+.idx.soft { color: inherit !important; }
+
+/* i-index soft colors */
+.idx.i-1.soft { background-color: #52057B40; }
+.idx.i-2.soft { background-color: #892CDC40; }
+.idx.i-3.soft { background-color: #BC6FF140; }
+
+/* j-index soft colors */
+.idx.j-1.soft { background-color: #3B524940; }
+.idx.j-2.soft { background-color: #51987240; }
+.idx.j-3.soft { background-color: #7EB64540; }
+
+/* non-valued i/j soft colors (used where specified) */
+.idx.i-n.soft { background-color: #ff00ff40; }
+.idx.j-n.soft { background-color: #1d631d40; }
+</style>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const ALL_I_VALUES = ["1","2","3"];
+  const LINES_3_TO_5 = [3,4,5];
+
+  const clear = () =>
+    document.querySelectorAll('.idx.hover, .idx.soft')
+      .forEach(n => n.classList.remove('hover','soft'));
+
+  const addAll = (selector, cls) =>
+    document.querySelectorAll(selector).forEach(n => n.classList.add(cls));
+
+  const parseInfo = (el) => {
+    const cs = el.classList;
+    const lineClass = [...cs].find(c => /^line-\d$/.test(c));
+    const line = lineClass ? Number(lineClass.split('-')[1]) : null;
+    const iCls = [...cs].find(c => c.startsWith('i-')); // i-n, i-1, i-2, i-3
+    const jCls = [...cs].find(c => c.startsWith('j-')); // j-n, j-1, j-2, j-3
+    const which = iCls ? 'i' : 'j';
+    const val = (iCls || jCls).split('-')[1]; // 'n' or '1'/'2'/'3'
+    return { line, which, val };
+  };
+
+  const highlightLineValue = (line, which, val, kind /* 'hover'|'soft' */) =>
+    addAll(`.idx.${which}-${val}.line-${line}`, kind);
+
+  const highlightAllValue = (which, val, kind) =>
+    addAll(`.idx.${which}-${val}`, kind);
+
+  const attach = () => {
+    document.querySelectorAll('.idx').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        clear();
+        const { line, which, val } = parseInfo(el);
+
+        // Fallback: old behavior if parse fails
+        if (!line || !which || !val) {
+          if (which && val) highlightAllValue(which, val, 'hover');
+          return;
+        }
+
+        if (line === 1) {
+          // Hover on Line 1 over non-valued i/j: highlight all non-valued i/j
+          if (val === 'n') highlightAllValue(which, 'n', 'hover');
+          return;
+        }
+
+        if (line === 2) {
+          if (which === 'i') {
+            // Line 2 (i): same i on L2 = full; other i on L2 = soft; L3–5 same i = soft
+            highlightLineValue(2, 'i', val, 'hover');
+            ALL_I_VALUES.filter(v => v !== val)
+                        .forEach(v => highlightLineValue(2, 'i', v, 'soft'));
+            LINES_3_TO_5.forEach(L => highlightLineValue(L, 'i', val, 'soft'));
+          } else if (which === 'j' && val === 'n') {
+            // Line 2 (j-n): L1 & L2 j-n = full
+            [1,2].forEach(L => highlightLineValue(L, 'j', 'n', 'hover'));
+          }
+          return;
+        }
+
+        if (LINES_3_TO_5.includes(line)) {
+          if (which === 'i') {
+            // L3–5 (i): same i everywhere = full
+            highlightAllValue('i', val, 'hover');
+          } else if (which === 'j') {
+            // L3–5 (j): same j on L3–5 = full; L2 j-n = soft
+            LINES_3_TO_5.forEach(L => highlightLineValue(L, 'j', val, 'hover'));
+            highlightLineValue(2, 'j', 'n', 'soft');
+          }
+          return;
+        }
+      });
+
+      el.addEventListener('mouseleave', clear);
+    });
+  };
+
+  // Ensure MathJax has finished creating the .idx nodes
+  if (window.MathJax?.startup?.promise) {
+    window.MathJax.startup.promise.then(attach);
+  } else {
+    attach();
+  }
+});
+</script>
+
+\begin{aligned}
+s_{ij} t_{ij}
+&= \sum_{\class{idx i-n line-1}{i}=1}^{3} \sum_{\class{idx j-n line-1}{j}=1}^{3} 
+   s_{\class{idx i-n line-1}{i}\class{idx j-n line-1}{j}} 
+   t_{\class{idx i-n line-1}{i}\class{idx j-n line-1}{j}} \\
+&= 
+   s_{\class{idx i-1 line-2}{1}\class{idx j-n line-2}{j}} t_{\class{idx i-1 line-2}{1}\class{idx j-n line-2}{j}} +
+   s_{\class{idx i-2 line-2}{2}\class{idx j-n line-2}{j}} t_{\class{idx i-2 line-2}{2}\class{idx j-n line-2}{j}} +
+   s_{\class{idx i-3 line-2}{3}\class{idx j-n line-2}{j}} t_{\class{idx i-3 line-2}{3}\class{idx j-n line-2}{j}} \\[20pt]
+&= 
+  s_{\class{idx i-1 line-3}{1}\class{idx j-1 line-3}{1}} t_{\class{idx i-1 line-3}{1}\class{idx j-1 line-3}{1}} +
+  s_{\class{idx i-1 line-3}{1}\class{idx j-2 line-3}{2}} t_{\class{idx i-1 line-3}{1}\class{idx j-2 line-3}{2}} +
+  s_{\class{idx i-1 line-3}{1}\class{idx j-3 line-3}{3}} t_{\class{idx i-1 line-3}{1}\class{idx j-3 line-3}{3}} \\
+&\quad +
+  s_{\class{idx i-2 line-4}{2}\class{idx j-1 line-4}{1}} t_{\class{idx i-2 line-4}{2}\class{idx j-1 line-4}{1}} +
+  s_{\class{idx i-2 line-4}{2}\class{idx j-2 line-4}{2}} t_{\class{idx i-2 line-4}{2}\class{idx j-2 line-4}{2}} +
+  s_{\class{idx i-2 line-4}{2}\class{idx j-3 line-4}{3}} t_{\class{idx i-2 line-4}{2}\class{idx j-3 line-4}{3}} \\
+&\quad +
+  s_{\class{idx i-3 line-5}{3}\class{idx j-1 line-5}{1}} t_{\class{idx i-3 line-5}{3}\class{idx j-1 line-5}{1}} +
+  s_{\class{idx i-3 line-5}{3}\class{idx j-2 line-5}{2}} t_{\class{idx i-3 line-5}{3}\class{idx j-2 line-5}{2}} +
+  s_{\class{idx i-3 line-5}{3}\class{idx j-3 line-5}{3}} t_{\class{idx i-3 line-5}{3}\class{idx j-3 line-5}{3}} \\
+\end{aligned}

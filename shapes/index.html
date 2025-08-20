@@ -46,7 +46,7 @@
     }
     .arc {
       fill: none;
-      stroke: #333;
+      stroke: #c2c2c2;
       stroke-width: 1;
     }
     .label {
@@ -67,7 +67,7 @@
     const rad = d => d * Math.PI / 180;
     const deg = r => r * 180 / Math.PI;
     const polar = (R, theta) => [R * Math.cos(theta), R * Math.sin(theta)];
-    const arcPath = ({rInner, rWidth = 1, a0, a1}) =>
+    const arcPath = ({rInner, rWidth = 0.25, a0, a1}) =>
       d3.arc()({
         innerRadius: rInner,
         outerRadius: rInner + rWidth,
@@ -161,18 +161,18 @@
       // interior angle arc (at center): tiny tick from 90° down by aRad
       gArcs.append("path")
         .attr("class", "arc")
-        .attr("d", arcPath({ rInner: R*0.20, rWidth: 1, a0: Math.PI/2, a1: Math.PI/2 - aRad }));
+        .attr("d", arcPath({ rInner: R*0.20, rWidth: 0.25, a0: Math.PI/2, a1: Math.PI/2 - aRad }));
 
       // two small ticks near the outer right corner to show the exterior angle
       const baseRight = `translate(${R},0)`;
       gArcs.append("path")
         .attr("class", "arc")
-        .attr("d", arcPath({ rInner: R*0.18, rWidth: 1, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
+        .attr("d", arcPath({ rInner: R*0.18, rWidth: 0.25, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
         .attr("transform", baseRight);
 
       gArcs.append("path")
         .attr("class", "arc")
-        .attr("d", arcPath({ rInner: R*0.18 + 2, rWidth: 1, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
+        .attr("d", arcPath({ rInner: R*0.18 + 2, rWidth: 0.25, a0: Math.PI + Math.PI/2, a1: Math.PI + Math.PI/2 + aOutRad }))
         .attr("transform", baseRight);
 
       // symmetric pair across the edge (rotated frame)
@@ -182,7 +182,7 @@
           .attr("class", "arc")
           .attr("d", arcPath({
             rInner: R*0.08 + delta,
-            rWidth: 1,
+            rWidth: 0.25,
             a0: arcStart + aOutRad,
             a1: arcStart - aOutRad
           }))

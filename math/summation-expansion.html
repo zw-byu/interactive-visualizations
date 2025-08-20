@@ -178,6 +178,9 @@ window.Quarto = {
 /* non-valued i/j soft colors (used where specified) */
 .idx.i-n.soft { background-color: #ff00ff40; }
 .idx.j-n.soft { background-color: #1d631d40; }
+
+.lhs-comment {color: #c2c2c2; font-size: 0.85rem; font-family: sans-serif;  }
+.lhs-comment-idx {padding: 2pt 3pt; background-color: 52057B40; }
 </style>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -265,12 +268,14 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 });
 </script>
+<p>Hover the cursor over the various indices in the terms below to temporarily highlight related terms. </p>
 <span class="math display">\[\begin{aligned}
 s_{ij} t_{ij}
 &amp;= \sum_{\class{idx i-n line-1}{i}=1}^{3} \sum_{\class{idx j-n line-1}{j}=1}^{3}
    s_{\class{idx i-n line-1}{i}\class{idx j-n line-1}{j}}
    t_{\class{idx i-n line-1}{i}\class{idx j-n line-1}{j}} \\
-&amp;=
+\textrm{\class{lhs-comment}{expansion of `i` indices}}\class{lhs-comment}{\rightarrow}
+   &amp;=
    s_{\class{idx i-1 line-2}{1}\class{idx j-n line-2}{j}} t_{\class{idx i-1 line-2}{1}\class{idx j-n line-2}{j}} +
    s_{\class{idx i-2 line-2}{2}\class{idx j-n line-2}{j}} t_{\class{idx i-2 line-2}{2}\class{idx j-n line-2}{j}} +
    s_{\class{idx i-3 line-2}{3}\class{idx j-n line-2}{j}} t_{\class{idx i-3 line-2}{3}\class{idx j-n line-2}{j}} \\[20pt]

@@ -1,0 +1,4 @@
+- source: project
+  quarto-pub:
+    - id: 3d0d8236-75f1-4584-83d2-c20cc3b94e19
+      url: https://zrwhite.quarto.pub/lagrange_approximation

@@ -1,0 +1,66 @@
+[ ============= 
+OPERATORS & UTILITIES ]{.content-hidden}
+\newcommand{\comment}[1]{\textcolor{darkgray}{\leftarrow \text{\small{#1}}}}
+\newcommand{\commentline}[1]{\textcolor{darkgray}{\quad\quad ⬑ \text{\small{#1}}}}
+\newcommand{\commentlineNone}[1]{\textcolor{darkgray}{\quad\quad \text{\small{#1}}}}
+\newcommand{\eq}{\;=\;}
+\newcommand{\eqq}{\; &= \;}
+\newcommand{\PDiff}[2]{\frac{\partial#1}{\partial#2}}
+\newcommand{\PDDiffSplit}[3]{\frac{\partial^{2}#1}{\partial#2\partial#3}}
+\newcommand{\gradtext}[1]{\mathrm{grad}\;\TensorSP{#1}}
+\newcommand{\divtext}[1]{\mathrm{div}\;\TensorSP{#1}}
+\newcommand{\curltext}[1]{\mathrm{curl}\;\TensorSP{#1}}
+\newcommand{\grad}[1]{\nabla{\TensorSP{#1}}}
+\newcommand{\div}[1]{\nabla\cdot{\TensorSP{#1}}}
+\newcommand{\curl}[1]{\nabla\times{\TensorSP{#1}}}
+\newcommand{\thingSquare}{\tiny{\blacksquare}}
+\newcommand{\thingTriangle}{\tiny{\blacktriangle}}
+\newcommand{\thingLozenge}{\tiny{\blacklozenge}}
+\newcommand{\thingCircle}{\tiny{\CIRCLE}}
+[ LEFTCIRCLE RIGHTCIRCLE blacktriangleright RHD blacktriangleleft LHD ]{.content-hidden}
+[ ============= 
+CARTESIAN UNIT VECS ]{.content-hidden}
+\newcommand{\CartesianUnitVectorIndexed}[1][i]{\hat{\boldsymbol{e}}_{#1}}
+\newcommand{\Ehat}[1][i]{\CartesianUnitVectorIndexed[#1]}
+\newcommand{\CartesianUnitVectorsAll}{\CartesianUnitVectorIndexed, (i=1,2,3)}
+[ ============= 
+SPECIAL SYMBOLS ]{.content-hidden}
+\newcommand{\KroneckerDelta}[1][ij]{\delta_{#1}}
+\newcommand{\LeviCivitaSymbol}[1][ijk]{\varepsilon_{#1}}
+\newcommand{\levciv}[1][ijk]{\LeviCivitaSymbol[#1]}
+[ ============= 
+TENSORS - SYMBOLIC ]{.content-hidden}
+\newcommand{\TensorSymbolicPrintedBold}[1]{\boldsymbol{\mathrm{#1}}}
+\newcommand{\TensorSymbolicPrintedScript}[1]{\mathscr{#1}}
+\newcommand{\TensorSymbolicWrittenOrderI}[1]{\underline{\boldsymbol{\mathrm{#1}}}}
+\newcommand{\TensorSymbolicWrittenOrderII}[1]{\underline{\underline{\boldsymbol{\mathrm{#1}}}}}
+\newcommand{\TensorSymbolicWrittenOrderIII}[1]{\underline{\underline{\underline{\boldsymbol{\mathrm{#1}}}}}}
+\newcommand{\TensorSymbolicWrittenOrderIV}[1]{\underline{\underline{\underline{\underline{\boldsymbol{\mathrm{#1}}}}}}}
+
+[ ============= 
+SHORTCUTS ]{.content-hidden}
+\newcommand{\Kron}[1][ij]{\KroneckerDelta[#1]}
+\newcommand{\PermSym}[1][ijk]{\LeviCivitaSymbol[#1]}
+\newcommand{\TensorSP}[1]{\TensorSymbolicPrintedBold{#1}}
+\newcommand{\TensorSPS}[1]{\TensorSymbolicPrintedScript{#1}}
+\newcommand{\TensorSW}[2]{%
+\def\OrderI{I}
+\def\OrderII{II}
+\def\OrderIII{III}
+\def\FirstArg{#1}
+\def\SecondArg{#2}
+  \ifx\SecondArg\OrderI
+    \ensuremath{\TensorSymbolicWrittenOrderI{#1}}
+    \else
+      \ifx\SecondArg\OrderII
+        \ensuremath{\TensorSymbolicWrittenOrderII{#1}}
+          \else
+            \ifx\SecondArg\OrderIII
+              \ensuremath{\TensorSymbolicWrittenOrderIII{#1}}
+                \else 
+                  \ensuremath{\TensorSymbolicWrittenOrderIV{#1}}
+                \fi
+           \fi 
+      \fi
+  
+}

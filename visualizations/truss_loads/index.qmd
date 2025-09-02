@@ -1,0 +1,1158 @@
+---
+title: "Truss Tributaries Interactive Explorer"
+format: html
+page-layout: full
+execute:
+  echo: false
+  warning: false
+  error: false
+---
+
+<style>
+  .viz-wrap { max-width: 1100px; margin: 0 auto; }
+  svg { width: 100%; height: auto; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+
+  /* Members (structure) */
+  .chord-top { stroke: #1f2937; stroke-width: 3; fill: none; }
+  .chord-bot { stroke: #1f2937; stroke-width: 2; fill: none; }
+  .web       { stroke: #1f2937; stroke-width: 2; fill: none; }  /* webs in black */
+
+  /* Dimensioning */
+  .dim { stroke: #9ca3af; stroke-width: 1; fill: none; }
+  .dim-total { stroke: #6b7280; stroke-dasharray: 4 3; }
+  .ext { stroke: #9ca3af; stroke-width: 1; }
+  .tick { stroke: #9ca3af; stroke-width: 1.2; }
+  .label { fill: #374151; font-size: 12px; dominant-baseline: middle; }
+  .label-small { fill: #4b5563; font-size: 11px; dominant-baseline: middle; }
+  .label-dim { fill: #374151; font-size: 12px; }
+
+  /* Extra light diagonal-chord dims */
+  .dim-ghost { stroke: #e5e7eb; stroke-width: 1.2; fill: none; }
+  .tick-ghost { stroke: #e5e7eb; stroke-width: 1.2; }
+
+  /* Hover affordances */
+  .node-hit { fill: #000; opacity: 0; pointer-events: all; }
+  .node-ring { fill: #ffffff; stroke: #111827; stroke-width: 1.25; }
+  .node-ring.hot { fill: #fef3c7; stroke: #b45309; }
+
+  /* Highlighted tributary */
+  .tribu { stroke-width: 6; fill: none; }
+  .tribu-dim { stroke-width: 1.5; fill: none; }
+
+  .baseline { stroke: #9ca3af; stroke-width: 1.2; stroke-dasharray: 3 3; }
+
+  .controls { display:flex; gap:12px; align-items:center; margin: 0 0 10px 0; flex-wrap: wrap; }
+  .controls label { font-weight: 600; color:#374151; }
+  .controls select { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; }
+</style>
+
+## Double Howe / Double Fink — Interactive Tributary Highlight
+
+Use the dropdowns to switch **Truss type** and **Units**.  
+- **Metric:** span & sub-dimensions in meters.  
+- **USCS:** span in feet; **sub-dimensions in inches** (including hover labels and horizontal projections).
+
+```{ojs}
+//|echo: false
+d3 = require("d3@7")
+```
+
+```{ojs}
+//|echo: false
+{
+  // ===== Units & helpers (shared) =====
+  const IN = 0.0254, FT = 12 * IN;   // meters per inch, meters per foot
+
+  // Formatters
+  function fmtSpan(m, unitsMode) {
+    if (unitsMode === "uscs") return `${(m/FT).toFixed(2)} ft`;
+    return `${m.toFixed(3)} m`;
+  }
+  function fmtSub(m, unitsMode) {
+    if (unitsMode === "uscs") return `${(m/IN).toFixed(2)} in`;
+    return `${m.toFixed(3)} m`;
+  }
+  function fmtHeight(m, unitsMode) {
+    if (unitsMode === "uscs") return `${(m/IN).toFixed(2)} in`;
+    return `${m.toFixed(3)} m`;
+  }
+
+  function accumulateArc(nodes) {
+    let s = 0;
+    const out = [{...nodes[0], s}];
+    for (let k = 1; k < nodes.length; k++) {
+      const dx = nodes[k].xh - nodes[k-1].xh;
+      const dy = nodes[k].yh - nodes[k-1].yh;
+      const ds = Math.hypot(dx, dy);
+      s += ds;
+      out.push({...nodes[k], s});
+    }
+    return out;
+  }
+
+  function slicePolylineByS(nodesS, s0, s1) {
+    const segs = [];
+    for (let k = 1; k < nodesS.length; k++) {
+      const A = nodesS[k-1], B = nodesS[k];
+      const sA = A.s, sB = B.s;
+      const overlap0 = Math.max(s0, sA);
+      const overlap1 = Math.min(s1, sB);
+      if (overlap1 <= overlap0) continue;
+      const t0 = (overlap0 - sA) / (sB - sA);
+      const t1 = (overlap1 - sA) / (sB - sA);
+      const P0 = { xh: A.xh + (B.xh - A.xh) * t0, yh: A.yh + (B.yh - A.yh) * t0 };
+      const P1 = { xh: A.xh + (B.xh - A.xh) * t1, yh: A.yh + (B.yh - A.yh) * t1 };
+      segs.push([P0, P1]);
+    }
+    return segs;
+  }
+
+  function sAtX(topS, xTarget_m) {
+    if (xTarget_m <= topS[0].xh) return 0;
+    const last = topS[topS.length-1];
+    if (xTarget_m >= last.xh) return last.s;
+    for (let k = 1; k < topS.length; k++) {
+      const A = topS[k-1], B = topS[k];
+      if (xTarget_m <= B.xh) {
+        const t = (xTarget_m - A.xh) / (B.xh - A.xh);
+        return A.s + t * (B.s - A.s);
+      }
+    }
+    return last.s;
+  }
+
+  function arrowTicks(p, q, offVec, tickLen = 5) {
+    const ux = q.x - p.x, uy = q.y - p.y;
+    const L = Math.hypot(ux, uy) || 1;
+    const vx = -uy / L, vy = ux / L;
+    return [
+      [p.x + offVec.x + vx * tickLen, p.y + offVec.y + vy * tickLen, p.x + offVec.x - vx * tickLen, p.y + offVec.y - vy * tickLen],
+      [q.x + offVec.x + vx * tickLen, q.y + offVec.y + vy * tickLen, q.x + offVec.x - vx * tickLen, q.y + offVec.y - vy * tickLen],
+    ];
+  }
+
+  // === Label: slanted top-chord true length (left half), ~85 px normal ===
+  function placeTopChordLengthLabel(topNodes, topS, group, unitsMode, x, yScale) {
+    const k = Math.max(0, Math.min(topNodes.length - 2, Math.floor(topNodes.length / 4))); // ~left quarter
+    const A = topNodes[k], B = topNodes[k+1];
+    const px = x(A.xh), py = yScale(A.yh);
+    const qx = x(B.xh), qy = yScale(B.yh);
+    const dx = qx - px, dy = qy - py;
+    const Lp = Math.hypot(dx, dy) || 1;
+    let nx = -dy / Lp, ny = dx / Lp;         // screen-space normal
+    const sign = (ny > 0) ? -1 : 1;          // push upward in screen coords
+    const off = 85;                           // << updated from 150 to ~85
+    const tx = (px + qx) / 2 + nx * off * sign;
+    const ty = (py + qy) / 2 + ny * off * sign;
+    const angleDeg = Math.atan2(dy, dx) * 180/Math.PI;
+
+    group.append("text")
+      .attr("class", "label-dim")
+      .attr("text-anchor", "middle")
+      .attr("transform", `translate(${tx},${ty}) rotate(${angleDeg})`)
+      .text(`Top-chord true length ≈ ${fmtSpan(topS[topS.length - 1].s, unitsMode)}`);
+  }
+
+  // === New: diagonal-chord dimension lines for LEFT top chord (very light gray) ===
+  function drawLeftTopChordDiagDim(topNodes, group, x, yScale) {
+    const midIdx = Math.floor((topNodes.length - 1) / 2); // apex index
+    const A = topNodes[0], B = topNodes[midIdx];          // left heel to apex (left top chord)
+    const P = { x: x(A.xh), y: yScale(A.yh) };
+    const Q = { x: x(B.xh), y: yScale(B.yh) };
+
+    const dx = Q.x - P.x, dy = Q.y - P.y;
+    const Lp = Math.hypot(dx, dy) || 1;
+    const ux = dx / Lp, uy = dy / Lp;
+    let nx = -uy, ny = ux;                                // normal
+    const sign = (ny > 0) ? -1 : 1;                       // same side as main label
+    const off = 80;                                       // slightly below the true-length label (85)
+    const tick = 10;                                      // end tick half-length
+
+    // Shifted end points for the parallel dim line
+    const Pn = { x: P.x + nx * off * sign, y: P.y + ny * off * sign };
+    const Qn = { x: Q.x + nx * off * sign, y: Q.y + ny * off * sign };
+
+    // Parallel line (very light gray)
+    group.append("line").attr("class","dim-ghost")
+      .attr("x1", Pn.x).attr("y1", Pn.y)
+      .attr("x2", Qn.x).attr("y2", Qn.y);
+
+    // End ticks (normal to the chord, centered on Pn and Qn)
+    group.append("line").attr("class","tick-ghost")
+      .attr("x1", Pn.x - nx * tick).attr("y1", Pn.y - ny * tick)
+      .attr("x2", Pn.x + nx * tick).attr("y2", Pn.y + ny * tick);
+    group.append("line").attr("class","tick-ghost")
+      .attr("x1", Qn.x - nx * tick).attr("y1", Qn.y - ny * tick)
+      .attr("x2", Qn.x + nx * tick).attr("y2", Qn.y + ny * tick);
+  }
+
+  // === Vertical height dimension (short equal stubs at dim line; vertical label) ===
+  function drawApexHeightDim(group, x, yScale, span_m, rise_m, unitsMode) {
+    const baseY = yScale(0);
+    const xDim  = x(0) - 26;  // to the left of the heel (dimension line position)
+    const stub = 24;          // short, equal-length horizontal stubs
+
+    // Short horizontal stubs at top (apex y) and bottom (heel y)
+    group.append("line").attr("class","ext")
+      .attr("x1", xDim).attr("y1", yScale(rise_m)).attr("x2", xDim + stub).attr("y2", yScale(rise_m));
+    group.append("line").attr("class","ext")
+      .attr("x1", xDim).attr("y1", baseY).attr("x2", xDim + stub).attr("y2", baseY);
+
+    // Vertical dimension line
+    group.append("line").attr("class","dim")
+      .attr("x1", xDim).attr("y1", yScale(rise_m)).attr("x2", xDim).attr("y2", baseY);
+
+    // End ticks on the vertical dim line
+    const ticks = [
+      [xDim - 6, yScale(rise_m), xDim + 6, yScale(rise_m)],
+      [xDim - 6, baseY,          xDim + 6, baseY]
+    ];
+    ticks.forEach(t => group.append("line").attr("class","tick")
+      .attr("x1", t[0]).attr("y1", t[1]).attr("x2", t[2]).attr("y2", t[3]));
+
+    // Vertical label (rotated), offset slightly left of the dim line
+    const yMid = (yScale(rise_m) + baseY) / 2;
+    group.append("text")
+      .attr("class","label")
+      .attr("text-anchor","middle")
+      .attr("transform", `translate(${xDim - 18},${yMid}) rotate(-90)`)
+      .text(`Height: ${fmtHeight(rise_m, unitsMode)}`);
+  }
+
+  // ===== Container, controls, and SVG shell =====
+  const container = d3.create("div").attr("class", "viz-wrap");
+  const controls = container.append("div").attr("class","controls");
+
+  // Truss selector
+  controls.append("label").attr("for","trussType").text("Truss:");
+  const selectTruss = controls.append("select").attr("id","trussType");
+  selectTruss.selectAll("option")
+    .data([
+      {val:"double-howe", label:"Double Howe (6-panel)"},
+      {val:"double-fink", label:"Double Fink (40-ft canonical)"},
+    ])
+    .enter().append("option")
+      .attr("value", d=>d.val).text(d=>d.label);
+  selectTruss.property("value","double-howe");
+
+  // Units selector
+  controls.append("label").attr("for","unitsMode").text("Units:");
+  const selectUnits = controls.append("select").attr("id","unitsMode");
+  selectUnits.selectAll("option")
+    .data([
+      {val:"uscs", label:"USCS (ft span, in sub-dims)"},
+      {val:"metric", label:"Metric (m)"},
+    ])
+    .enter().append("option")
+      .attr("value", d=>d.val).text(d=>d.label);
+  selectUnits.property("value","uscs");
+
+  // Extra headroom above chord for labels
+  const margin = {top: 160, right: 40, bottom: 110, left: 60};
+  const W = 1000, H = 640;
+  const innerW = W - margin.left - margin.right;
+  const innerH = H - margin.top - margin.bottom;
+
+  const svg = container.append("svg").attr("viewBox", [0,0,W,H].join(" "));
+  const g   = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // ===== Dimension drawers =====
+  function drawDimAlongChord(topNodes, k, group, unitsMode, x, yScale) {
+    const A = topNodes[k], B = topNodes[k+1];
+    if (!A || !B) return;
+    const P = {x: x(A.xh), y: yScale(A.yh)};
+    const Q = {x: x(B.xh), y: yScale(B.yh)};
+
+    // Perpendicular (offset ABOVE chord)
+    const ux = Q.x - P.x, uy = Q.y - P.y, L = Math.hypot(ux, uy) || 1;
+    const nx = -(uy / L), ny = ux / L;
+    const off = 12, sign = (ny > 0) ? -1 : 1;
+    const offVec = {x: nx * off * sign, y: ny * off * sign};
+
+    group.append("line").attr("class","dim")
+      .attr("x1", P.x + offVec.x).attr("y1", P.y + offVec.y)
+      .attr("x2", Q.x + offVec.x).attr("y2", Q.y + offVec.y);
+
+    arrowTicks(P, Q, offVec, 5).forEach(t => group.append("line").attr("class","tick")
+      .attr("x1", t[0]).attr("y1", t[1]).attr("x2", t[2]).attr("y2", t[3]));
+
+    const mid = { x: (P.x+Q.x)/2 + offVec.x, y: (P.y+Q.y)/2 + offVec.y };
+    const len_m = Math.hypot(B.xh - A.xh, B.yh - A.yh);
+    group.append("text").attr("class","label-small")
+      .attr("x", mid.x).attr("y", mid.y - 8).attr("text-anchor", "middle")
+      .text(fmtSub(len_m, unitsMode));
+  }
+
+  function drawDimHorizontal(topNodes, k, group, baseY, yOffsetPx, unitsMode, x) {
+    const A = topNodes[k], B = topNodes[k+1];
+    if (!A || !B) return;
+    const x1p = x(A.xh), x2p = x(B.xh);
+    const y0  = baseY + yOffsetPx;
+
+    group.append("line").attr("class","dim")
+      .attr("x1", x1p).attr("y1", y0).attr("x2", x2p).attr("y2", y0);
+
+    [x1p, x2p].forEach(xx => {
+      group.append("line").attr("class","ext").attr("x1", xx).attr("y1", baseY).attr("x2", xx).attr("y2", y0);
+      group.append("line").attr("class","tick").attr("x1", xx).attr("y1", y0-5).attr("x2", xx).attr("y2", y0+5);
+    });
+
+    const dx_m = (B.xh - A.xh);
+    group.append("text").attr("class","label-small")
+      .attr("x", (x1p+x2p)/2).attr("y", y0 - 6).attr("text-anchor","middle")
+      .text(fmtSub(dx_m, unitsMode));
+  }
+
+  // ===== Render function (switchable) =====
+  function render(trussType="double-howe", unitsMode="uscs") {
+    g.selectAll("*").remove();
+
+    const chords = g.append("g");
+    const websG  = g.append("g").attr("class","webs");
+    const dims   = g.append("g");
+    const highlight = g.append("g");
+    const nodesG = g.append("g");
+
+    let topNodes = [];
+    let topS = null;
+    let span_m = 0;
+    let rise_m = 0;
+    let x, yScale;
+    let topJoinIdx = new Set();
+
+    if (trussType === "double-howe") {
+      // === Double Howe (default span: 40 ft) ===
+      const span_ft = 40;
+      span_m = span_ft * FT;
+      rise_m = 0.2 * span_m;           // simple symmetric ridge
+      const nPanels = 6;
+      const panel_m = span_m / nPanels;
+
+      x = d3.scaleLinear().domain([0, span_m]).range([0, innerW]);
+      yScale = d3.scaleLinear().domain([rise_m + 1, -1]).range([0, innerH]);
+      const baseY = yScale(0);
+
+      // Top chord nodes (symmetric ridge)
+      topNodes = d3.range(nPanels + 1).map(i => {
+        const xh = i * panel_m;
+        const mid = span_m / 2;
+        const t = xh <= mid ? xh / mid : (span_m - xh) / mid;
+        const yh = rise_m * t;
+        return {i, xh, yh};
+      });
+
+      // chords & baseline
+      g.append("line").attr("class","baseline")
+        .attr("x1", x(0)).attr("y1", baseY).attr("x2", x(span_m)).attr("y2", baseY);
+      chords.append("path").attr("class","chord-bot")
+        .attr("d", d3.line().x(d=>d[0]).y(d=>d[1])([[x(0), baseY],[x(span_m), baseY]]) );
+      chords.append("path").attr("class","chord-top")
+        .attr("d", d3.line().x(d=>x(d.xh)).y(d=>yScale(d.yh))(topNodes));
+
+      // webs (5 verticals + diagonals toward center)
+      const midIdx = nPanels/2;
+      [1,2,midIdx,4,5].forEach(i=>{
+        websG.append("line").attr("class","web")
+          .attr("x1", x(topNodes[i].xh)).attr("y1", yScale(topNodes[i].yh))
+          .attr("x2", x(topNodes[i].xh)).attr("y2", baseY);
+      });
+      // diagonals: Left top(1)->bottom(2), top(2)->bottom(3); Right top(5)->bottom(4), top(4)->bottom(3)
+      websG.append("line").attr("class","web")
+        .attr("x1", x(topNodes[1].xh)).attr("y1", yScale(topNodes[1].yh))
+        .attr("x2", x(topNodes[2].xh)).attr("y2", baseY);
+      websG.append("line").attr("class","web")
+        .attr("x1", x(topNodes[2].xh)).attr("y1", yScale(topNodes[2].yh))
+        .attr("x2", x(topNodes[midIdx].xh)).attr("y2", baseY);
+      websG.append("line").attr("class","web")
+        .attr("x1", x(topNodes[5].xh)).attr("y1", yScale(topNodes[5].yh))
+        .attr("x2", x(topNodes[4].xh)).attr("y2", baseY);
+      websG.append("line").attr("class","web")
+        .attr("x1", x(topNodes[4].xh)).attr("y1", yScale(topNodes[4].yh))
+        .attr("x2", x(topNodes[midIdx].xh)).attr("y2", baseY);
+
+      // include end nodes in hover set
+      topJoinIdx = new Set([0,1,2,3,4,5,6]);
+      topS = accumulateArc(topNodes);
+
+      // per-panel dims (sub-dimensions)
+      for (let k = 0; k < topNodes.length - 1; k++) {
+        drawDimAlongChord(topNodes, k, dims, unitsMode, x, yScale);
+        drawDimHorizontal(topNodes, k, dims, baseY, 28, unitsMode, x);
+      }
+
+      // total span dim
+      const yD_total = baseY + 70;
+      dims.append("line").attr("class","dim dim-total")
+        .attr("x1", x(0)).attr("y1", yD_total).attr("x2", x(span_m)).attr("y2", yD_total);
+      [0, span_m].forEach(X=>{
+        dims.append("line").attr("class","ext")
+          .attr("x1", x(X)).attr("y1", baseY).attr("x2", x(X)).attr("y2", yD_total);
+      });
+      [[x(0),yD_total],[x(span_m),yD_total]].forEach(([xx,yy])=>{
+        dims.append("line").attr("class","tick").attr("x1", xx).attr("y1", yy-6).attr("x2", xx).attr("y2", yy+6);
+      });
+      dims.append("text").attr("class","label")
+        .attr("x", (x(0)+x(span_m))/2).attr("y", yD_total - 10).attr("text-anchor","middle")
+        .text(`${fmtSpan(span_m, unitsMode)} (horizontal span)`);
+
+      // top-chord true length label (slanted, left half, ~85px off)
+      placeTopChordLengthLabel(topNodes, topS, dims, unitsMode, x, yScale);
+
+      // NEW: diagonal-chord dim (left top chord) below the label
+      drawLeftTopChordDiagDim(topNodes, dims, x, yScale);
+
+      // apex-height dim at left (short equal stubs; vertical label)
+      drawApexHeightDim(dims, x, yScale, span_m, rise_m, unitsMode);
+
+      // color scale
+      const colorScale = d3.scaleOrdinal()
+        .domain(d3.range(topS.length))
+        .range(["#2563eb","#dc2626","#16a34a","#a855f7","#ea580c","#0891b2","#eab308","#0ea5e9","#f97316","#22c55e","#ef4444"]);
+
+      function showTributary(iNode) {
+        highlight.selectAll("*").remove();
+        const color = colorScale(iNode);
+
+        // Along-chord span
+        let s0, s1;
+        if (iNode === 0) {
+          const xEnd = topNodes[0].xh, xNext = topNodes[1].xh;
+          const xHalf = xEnd + (xNext - xEnd)/2;
+          s0 = 0;
+          s1 = sAtX(topS, xHalf);
+        } else if (iNode === topS.length - 1) {
+          const xEnd = topNodes[topNodes.length-1].xh, xPrev = topNodes[topNodes.length-2].xh;
+          const xHalf = xPrev + (xEnd - xPrev)/2;
+          s0 = sAtX(topS, xHalf);
+          s1 = topS[topS.length-1].s;
+        } else {
+          const s_i   = topS[iNode].s;
+          const s_prev = topS[iNode-1].s;
+          const s_next = topS[iNode+1].s;
+          s0 = (s_prev + s_i) / 2;
+          s1 = (s_i + s_next) / 2;
+        }
+
+        const segs = slicePolylineByS(topS, s0, s1);
+
+        segs.forEach(([P,Q])=>{
+          highlight.append("line").attr("class","tribu").attr("stroke", color)
+            .attr("x1", x(P.xh)).attr("y1", yScale(P.yh))
+            .attr("x2", x(Q.xh)).attr("y2", yScale(Q.yh));
+        });
+
+        // Metrics & label placement
+        let L_along = 0, Xc = 0, Yc = 0, sumDXp = 0, sumDYp = 0;
+        segs.forEach(([P,Q])=>{
+          const ds = Math.hypot(Q.xh - P.xh, Q.yh - P.yh);
+          L_along += ds;
+          const xm = (P.xh + Q.xh)/2, ym = (P.yh + Q.yh)/2;
+          Xc += xm * ds; Yc += ym * ds;
+          sumDXp += (x(Q.xh) - x(P.xh));
+          sumDYp += (yScale(Q.yh) - yScale(P.yh));
+        });
+        if (L_along > 0) { Xc /= L_along; Yc /= L_along; }
+
+        const Lp = Math.hypot(sumDXp, sumDYp) || 1;
+        let nx = -sumDYp / Lp, ny = sumDXp / Lp;
+        const sign = (ny > 0) ? -1 : 1;
+        const offAlong = 50, offNode = 74;
+        const angleDeg = Math.atan2(sumDYp, sumDXp) * 180/Math.PI;
+
+        const tx = x(Xc) + nx * offAlong * sign;
+        const ty = yScale(Yc) + ny * offAlong * sign;
+        highlight.append("text")
+          .attr("class","label-dim")
+          .attr("fill", color)
+          .attr("text-anchor","middle")
+          .attr("transform", `translate(${tx},${ty}) rotate(${angleDeg})`)
+          .text(`Along chord: ${fmtSub(L_along, unitsMode)}`);
+
+        const tx2 = x(Xc) + nx * offNode * sign;
+        const ty2 = yScale(Yc) + ny * offNode * sign;
+        highlight.append("text")
+          .attr("class","label-dim")
+          .attr("fill", color)
+          .attr("text-anchor","middle")
+          .attr("transform", `translate(${tx2},${ty2}) rotate(${angleDeg})`)
+          .text(`Node ${iNode} tributary`);
+
+        // Horizontal projection
+        const n = topNodes.length;
+        const xH = topNodes[iNode].xh;
+        const xL = (iNode === 0)     ? xH : (xH + topNodes[iNode-1].xh)/2;
+        const xR = (iNode === n-1)   ? xH : (xH + topNodes[iNode+1].xh)/2;
+
+        const Lx_m = Math.abs(xR - xL);
+        const xLeft_m  = Math.min(xL, xR);
+        const xRight_m = Math.max(xL, xR);
+        const x1p = x(xLeft_m), x2p = x(xRight_m);
+        const yD = baseY + 95;
+
+        highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+          .attr("x1", x1p).attr("y1", yD).attr("x2", x2p).attr("y2", yD);
+        [x1p,x2p].forEach(xx=>{
+          highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+            .attr("x1", xx).attr("y1", baseY).attr("x2", xx).attr("y2", yD);
+          highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+            .attr("x1", xx).attr("y1", yD-6).attr("x2", xx).attr("y2", yD+6);
+        });
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", (x1p+x2p)/2).attr("y", yD + 16).attr("text-anchor","middle")
+          .text(`Horizontal: ${fmtSub(Lx_m, unitsMode)}`);
+
+        const leftIn  = (xLeft_m  / IN).toFixed(2);
+        const rightIn = (xRight_m / IN).toFixed(2);
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", x1p).attr("y", yD + 32).attr("text-anchor","middle")
+          .text(`${leftIn} in`);
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", x2p).attr("y", yD + 32).attr("text-anchor","middle")
+          .text(`${rightIn} in`);
+      }
+
+      // Hover circles (includes end nodes)
+      const topJoinSorted = Array.from(topJoinIdx).sort((a,b)=>a-b);
+      topJoinSorted.forEach((idx) => {
+        const nd = topNodes[idx];
+        const px = x(nd.xh), py = yScale(nd.yh);
+        nodesG.append("circle").attr("class","node-ring").attr("cx", px).attr("cy", py).attr("r", 5);
+        nodesG.append("circle").attr("class","node-hit").attr("cx", px).attr("cy", py).attr("r", 14)
+          .on("mouseenter", function(){ d3.select(this.previousSibling).classed("hot", true); showTributary(idx); })
+          .on("mouseleave", function(){ d3.select(this.previousSibling).classed("hot", false); highlight.selectAll("*").remove(); });
+      });
+
+    } else {
+      // === Double Fink (canonical 40 ft; angles preserved) ===
+      const span_ft = 40, span_in = span_ft * 12, half_in = span_in/2;
+      const rise_base_in = 105.958;              // given at 40 ft
+      const slope_per_in = rise_base_in / 240;   // per inch of half-span
+      const rise_in = slope_per_in * half_in;
+      rise_m = rise_in * IN;
+      span_m = span_in * IN;
+
+      x = d3.scaleLinear().domain([0, span_m]).range([0, innerW]);
+      yScale = d3.scaleLinear().domain([rise_m + 1, -1]).range([0, innerH]);
+      const baseY = yScale(0);
+
+      const r = span_in / 480;
+      const top_x_in = [0, 88.4, 164.2, 240.0, 315.8, 391.6, 480.0].map(v => v * r);
+      const topNodes_in = top_x_in.map((xin, i) => ({ i, xh_in: xin, yh_in: slope_per_in * Math.min(xin, span_in - xin) }));
+      topNodes = topNodes_in.map(({i, xh_in, yh_in}) => ({ i, xh: xh_in*IN, yh: yh_in*IN }));
+
+      // chords & baseline
+      g.append("line").attr("class","baseline")
+        .attr("x1", x(0)).attr("y1", baseY).attr("x2", x(span_m)).attr("y2", baseY);
+      chords.append("path").attr("class","chord-bot")
+        .attr("d", d3.line().x(d=>d[0]).y(d=>d[1])([[x(0), baseY],[x(span_m), baseY]]) );
+      chords.append("path").attr("class","chord-top")
+        .attr("d", d3.line().x(d=>x(d.xh)).y(d=>yScale(d.yh))(topNodes));
+
+      // webs per canonical mapping
+      const bpt = xin => ({ xh: xin*IN, yh: 0 });
+      const T = topNodes;
+      const C_top   = T[3], L1_top = T[1], L2L3_top = T[2], R2R3_top = T[4], R1_top = T[5];
+      const b_mid   = bpt(240.0 * r);
+      const b_10356 = bpt(103.56 * r), b_19452 = bpt(194.52 * r);
+      const b_28548 = bpt(285.48 * r), b_37644 = bpt(376.44 * r);
+
+      // Left diagonals
+      [[L1_top, b_10356],[L2L3_top, b_10356],[L2L3_top, b_19452],[C_top, b_19452]].forEach(([P,Q])=>{
+        websG.append("line").attr("class","web")
+          .attr("x1", x(P.xh)).attr("y1", yScale(P.yh))
+          .attr("x2", x(Q.xh)).attr("y2", yScale(Q.yh));
+      });
+      // Center vertical
+      websG.append("line").attr("class","web")
+        .attr("x1", x(C_top.xh)).attr("y1", yScale(C_top.yh))
+        .attr("x2", x(b_mid.xh)).attr("y2", yScale(b_mid.yh));
+      // Right diagonals
+      [[R1_top, b_37644],[R2R3_top, b_37644],[R2R3_top, b_28548],[C_top, b_28548]].forEach(([P,Q])=>{
+        websG.append("line").attr("class","web")
+          .attr("x1", x(P.xh)).attr("y1", yScale(P.yh))
+          .attr("x2", x(Q.xh)).attr("y2", yScale(Q.yh));
+      });
+
+      // include end nodes
+      topJoinIdx = new Set([0,1,2,3,4,5,6]);
+      topS = accumulateArc(topNodes);
+
+      // per-panel dims (sub-dimensions)
+      for (let k = 0; k < topNodes.length - 1; k++) {
+        drawDimAlongChord(topNodes, k, dims, unitsMode, x, yScale);
+        drawDimHorizontal(topNodes, k, dims, baseY, 28, unitsMode, x);
+      }
+
+      // total span dim
+      const yD_total = baseY + 70;
+      dims.append("line").attr("class","dim dim-total")
+        .attr("x1", x(0)).attr("y1", yD_total).attr("x2", x(span_m)).attr("y2", yD_total);
+      [0, span_m].forEach(X=>{
+        dims.append("line").attr("class","ext")
+          .attr("x1", x(X)).attr("y1", baseY).attr("x2", x(X)).attr("y2", yD_total);
+      });
+      [[x(0),yD_total],[x(span_m),yD_total]].forEach(([xx,yy])=>{
+        dims.append("line").attr("class","tick").attr("x1", xx).attr("y1", yy-6).attr("x2", xx).attr("y2", yy+6);
+      });
+      dims.append("text").attr("class","label")
+        .attr("x", (x(0)+x(span_m))/2).attr("y", yD_total - 10).attr("text-anchor","middle")
+        .text(`${fmtSpan(span_m, unitsMode)} (horizontal span)`);
+
+      // top-chord true length label (slanted, left half, ~85px off)
+      placeTopChordLengthLabel(topNodes, topS, dims, unitsMode, x, yScale);
+
+      // NEW: diagonal-chord dim (left top chord) below the label
+      drawLeftTopChordDiagDim(topNodes, dims, x, yScale);
+
+      // apex-height dim at left (short equal stubs; vertical label)
+      drawApexHeightDim(dims, x, yScale, span_m, rise_m, unitsMode);
+
+      // color scale
+      const colorScale = d3.scaleOrdinal()
+        .domain(d3.range(topS.length))
+        .range(["#2563eb","#dc2626","#16a34a","#a855f7","#ea580c","#0891b2","#eab308","#0ea5e9","#f97316","#22c55e","#ef4444"]);
+
+      function showTributary(iNode) {
+        highlight.selectAll("*").remove();
+        const color = colorScale(iNode);
+
+        // Along-chord span (Fink rule: along-chord halves between neighbors)
+        const s_i   = topS[iNode].s;
+        const s_prev = iNode > 0 ? topS[iNode-1].s : s_i;
+        const s_next = iNode < topS.length-1 ? topS[iNode+1].s : s_i;
+
+        let s0, s1;
+        if (iNode === 0) {
+          s0 = s_i;
+          s1 = s_i + 0.5*(s_next - s_i);
+        } else if (iNode === topS.length-1) {
+          s0 = s_i - 0.5*(s_i - s_prev);
+          s1 = s_i;
+        } else {
+          s0 = (s_prev + s_i)/2;
+          s1 = (s_i + s_next)/2;
+        }
+
+        const segs = slicePolylineByS(topS, s0, s1);
+
+        segs.forEach(([P,Q])=>{
+          highlight.append("line").attr("class","tribu").attr("stroke", color)
+            .attr("x1", x(P.xh)).attr("y1", yScale(P.yh))
+            .attr("x2", x(Q.xh)).attr("y2", yScale(Q.yh));
+        });
+
+        // Metrics & label placement
+        let L_along = 0, Xc = 0, Yc = 0, sumDXp = 0, sumDYp = 0;
+        segs.forEach(([P,Q])=>{
+          const ds = Math.hypot(Q.xh - P.xh, Q.yh - P.yh);
+          L_along += ds;
+          const xm = (P.xh + Q.xh)/2, ym = (P.yh + Q.yh)/2;
+          Xc += xm * ds; Yc += ym * ds;
+          sumDXp += (x(Q.xh) - x(P.xh));
+          sumDYp += (yScale(Q.yh) - yScale(P.yh));
+        });
+        if (L_along > 0) { Xc /= L_along; Yc /= L_along; }
+
+        const Lp = Math.hypot(sumDXp, sumDYp) || 1;
+        let nx = -sumDYp / Lp, ny = sumDXp / Lp;
+        const sign = (ny > 0) ? -1 : 1;
+        const offAlong = 50, offNode = 74;
+        const angleDeg = Math.atan2(sumDYp, sumDXp) * 180/Math.PI;
+
+        const tx = x(Xc) + nx * offAlong * sign;
+        const ty = yScale(Yc) + ny * offAlong * sign;
+        highlight.append("text")
+          .attr("class","label-dim")
+          .attr("fill", color)
+          .attr("text-anchor","middle")
+          .attr("transform", `translate(${tx},${ty}) rotate(${angleDeg})`)
+          .text(`Along chord: ${fmtSub(L_along, unitsMode)}`);
+
+        const tx2 = x(Xc) + nx * offNode * sign;
+        const ty2 = yScale(Yc) + ny * offNode * sign;
+        highlight.append("text")
+          .attr("class","label-dim")
+          .attr("fill", color)
+          .attr("text-anchor","middle")
+          .attr("transform", `translate(${tx2},${ty2}) rotate(${angleDeg})`)
+          .text(`Node ${iNode} tributary`);
+
+        // Horizontal projection
+        const n = topNodes.length;
+        const xH = topNodes[iNode].xh;
+        const xL = (iNode === 0)     ? xH : (xH + topNodes[iNode-1].xh)/2;
+        const xR = (iNode === n-1)   ? xH : (xH + topNodes[iNode+1].xh)/2;
+
+        const Lx_m = Math.abs(xR - xL);
+        const xLeft_m  = Math.min(xL, xR);
+        const xRight_m = Math.max(xL, xR);
+        const x1p = x(xLeft_m), x2p = x(xRight_m);
+        const yD = baseY + 95;
+
+        highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+          .attr("x1", x1p).attr("y1", yD).attr("x2", x2p).attr("y2", yD);
+        [x1p,x2p].forEach(xx=>{
+          highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+            .attr("x1", xx).attr("y1", baseY).attr("x2", xx).attr("y2", yD);
+          highlight.append("line").attr("class","tribu-dim").attr("stroke", color)
+            .attr("x1", xx).attr("y1", yD-6).attr("x2", xx).attr("y2", yD+6);
+        });
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", (x1p+x2p)/2).attr("y", yD + 16).attr("text-anchor","middle")
+          .text(`Horizontal: ${fmtSub(Lx_m, unitsMode)}`);
+
+        const leftIn  = (xLeft_m  / IN).toFixed(2);
+        const rightIn = (xRight_m / IN).toFixed(2);
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", x1p).attr("y", yD + 32).attr("text-anchor","middle")
+          .text(`${leftIn} in`);
+        highlight.append("text").attr("class","label-dim").attr("fill", color)
+          .attr("x", x2p).attr("y", yD + 32).attr("text-anchor","middle")
+          .text(`${rightIn} in`);
+      }
+
+      // Hover circles (includes end nodes)
+      const topJoinSorted = Array.from(topJoinIdx).sort((a,b)=>a-b);
+      topJoinSorted.forEach((idx) => {
+        const nd = topNodes[idx];
+        const px = x(nd.xh), py = yScale(nd.yh);
+        nodesG.append("circle").attr("class","node-ring").attr("cx", px).attr("cy", py).attr("r", 5);
+        nodesG.append("circle").attr("class","node-hit").attr("cx", px).attr("cy", py).attr("r", 14)
+          .on("mouseenter", function(){ d3.select(this.previousSibling).classed("hot", true); showTributary(idx); })
+          .on("mouseleave", function(){ d3.select(this.previousSibling).classed("hot", false); highlight.selectAll("*").remove(); });
+      });
+    }
+  }
+
+  // Initial render & control wiring
+  function rerender() {
+    render(selectTruss.property("value"), selectUnits.property("value"));
+  }
+  rerender();
+  selectTruss.on("change", rerender);
+  selectUnits.on("change", rerender);
+
+  // Return DOM node so Quarto renders the UI + SVG
+  return container.node();   // <-- not 'svg', not 'svg;'
+}
+```
+
+```{ojs}
+//|echo: false
+{
+  // === Three-Truss Roof: Tributary Areas & Dead-Load Expressions (isometric, colinear extensions) ===
+
+  // -----------------------------
+  // Basic geometry
+  // -----------------------------
+  const span_in = 40 * 12;           // 40 ft span (in)
+  const half_in = span_in / 2;
+  const rise_in = (6/12) * half_in;  // 6:12 pitch -> 120 in
+
+  const L_units = 900;               // displayed ridge run (symbolic L)
+  const D_units = L_units / 2;       // truss spacing "L/2" (display only)
+
+  // -----------------------------
+  // Isometric projection
+  // -----------------------------
+  const deg = d => d * Math.PI / 180;
+  const phiX = deg(30), phiY = deg(150), phiZ = deg(90);
+  const ux = { x: Math.cos(phiX), y: Math.sin(phiX) };   // span (x)
+  const uy = { x: Math.cos(phiY), y: Math.sin(phiY) };   // ridge (y)
+  const uz = { x: Math.cos(phiZ), y: Math.sin(phiZ) };   // vertical (z)
+
+  const W = 1500, H = 840;
+  const margin = {top: 24, right: 56, bottom: 24, left: 72};
+  const innerW = W - margin.left - margin.right;
+  const innerH = H - margin.top - margin.bottom;
+
+  const container = d3.create("div").attr("class", "viz-wrap");
+  container.append("h3").text("Three-Truss Roof: Dead-Load Tributary Areas (isometric)");
+  container.append("div")
+    .style("margin","2px 0 10px 0").style("color","#4b5563").style("font-size","14px")
+    .html("40-ft double Howe trusses @ <b>6/12</b> pitch. Ridge length shown as <b>L</b>; truss spacing is <b>L/2</b> (depth exaggerated).");
+
+  const svg = container.append("svg").attr("viewBox", [0,0,W,H].join(" "));
+  const g   = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // scale factors: keep z==x for pitch fidelity; widen ridge depth 1.5x
+  const kx = (innerW * 0.62) / span_in;
+  const kz = kx;
+  const ky = 1.5 * (innerW * 0.26) / L_units;
+
+  function P0(x_in, y_u, z_in){
+    const X = x_in * kx * ux.x + y_u * ky * uy.x + z_in * kz * uz.x;
+    const Ym = x_in * kx * ux.y + y_u * ky * uy.y + z_in * kz * uz.y; // up-positive
+    return [X, -Ym];
+  }
+  const PX = (x,y,z)=> P0(x,y,z)[0];
+  const PY = (x,y,z)=> P0(x,y,z)[1];
+  const screenPt = (x,y,z)=>[PX(x,y,z), PY(x,y,z)];
+
+  // helpers
+  const DIM = "#cbd5e1";
+  const vnorm = (dx,dy)=>{ const L = Math.hypot(dx,dy)||1; return [dx/L, dy/L]; };
+  const addTick = (G,x,y,vx,vy,len)=>{ const [uxx,uyy]=vnorm(vx,vy);
+    G.append("line")
+      .attr("x1", x-uxx*len).attr("y1", y-uyy*len)
+      .attr("x2", x+uxx*len).attr("y2", y+uyy*len)
+      .attr("stroke", DIM).attr("stroke-width", 1.2);
+  };
+  const bcDirLeft = (y)=>{ const A=screenPt(0,y,0), B=screenPt(-10,y,0); return vnorm(B[0]-A[0], B[1]-A[1]); };
+
+  // robust 2D line intersection: P + t*v with Q + s*w
+  function intersectPoint(P, v, Q, w){
+    const det = v[0]*w[1] - v[1]*w[0];
+    if (Math.abs(det) < 1e-9) return null;
+    const dX = Q[0]-P[0], dY = Q[1]-P[1];
+    const t = (dX*w[1] - dY*w[0]) / det;
+    return [P[0] + t*v[0], P[1] + t*v[1]];
+  }
+
+  // roof faces for bbox and drawing
+  function stripPolyRaw(side, y0, y1){
+    if(side==="left"){
+      return [ P0(0,y0,0), P0(half_in,y0,rise_in), P0(half_in,y1,rise_in), P0(0,y1,0) ];
+    } else {
+      return [ P0(half_in,y0,rise_in), P0(span_in,y0,0), P0(span_in,y1,0), P0(half_in,y1,rise_in) ];
+    }
+  }
+
+  // auto-fit translation
+  const all = [ ...stripPolyRaw("left",0,2*D_units), ...stripPolyRaw("right",0,2*D_units) ];
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  all.forEach(([X,Y])=>{minX=Math.min(minX,X);maxX=Math.max(maxX,X);minY=Math.min(minY,Y);maxY=Math.max(maxY,Y);});
+  const tx = (innerW - (maxX-minX))/2 - minX;
+  const ty = (innerH - (maxY-minY))/2 - minY;
+  const sPX = (x,y,z)=> PX(x,y,z)+tx;
+  const sPY = (x,y,z)=> PY(x,y,z)+ty;
+  const sPt = (x,y,z)=> [sPX(x,y,z), sPY(x,y,z)];
+
+  // top chord nodes (double Howe)
+  const nPanels = 6, panel_in = span_in / nPanels;
+  const topNodes = d3.range(nPanels + 1).map(i => {
+    const x = i * panel_in;
+    const t = x <= half_in ? (x/half_in) : ((span_in-x)/half_in);
+    return {i, x_in: x, z_in: rise_in * t};
+  });
+  const bottomZ = 0;
+
+  // webs + truss
+  function drawHoweWebs(gr, y, stroke, sw){
+    const mid = nPanels/2;
+    [1,2,mid,4,5].forEach(i=>{
+      const A = topNodes[i];
+      gr.append("line")
+        .attr("x1",sPX(A.x_in,y,A.z_in)).attr("y1",sPY(A.x_in,y,A.z_in))
+        .attr("x2",sPX(A.x_in,y,bottomZ)).attr("y2",sPY(A.x_in,y,bottomZ))
+        .attr("stroke", stroke).attr("stroke-width", sw);
+    });
+    [[1,2],[2,mid]].forEach(([ia,ib])=>{
+      const A=topNodes[ia], B=topNodes[ib];
+      gr.append("line")
+        .attr("x1",sPX(A.x_in,y,A.z_in)).attr("y1",sPY(A.x_in,y,A.z_in))
+        .attr("x2",sPX(B.x_in,y,bottomZ)).attr("y2",sPY(B.x_in,y,bottomZ))
+        .attr("stroke", stroke).attr("stroke-width", sw);
+    });
+    [[5,4],[4,mid]].forEach(([ia,ib])=>{
+      const A=topNodes[ia], B=topNodes[ib];
+      gr.append("line")
+        .attr("x1",sPX(A.x_in,y,A.z_in)).attr("y1",sPY(A.x_in,y,A.z_in))
+        .attr("x2",sPX(B.x_in,y,bottomZ)).attr("y2",sPY(B.x_in,y,bottomZ))
+        .attr("stroke", stroke).attr("stroke-width", sw);
+    });
+  }
+  function drawHoweTruss(y, root, {stroke="#93c5fd", strokeWidth=2.2, className="truss"}={}){
+    const gr = root.append("g").attr("class", className).style("pointer-events","none");
+    gr.append("line")
+      .attr("x1",sPX(0,y,bottomZ)).attr("y1",sPY(0,y,bottomZ))
+      .attr("x2",sPX(span_in,y,bottomZ)).attr("y2",sPY(span_in,y,bottomZ))
+      .attr("stroke", stroke).attr("stroke-width", strokeWidth);
+    gr.append("path")
+      .attr("d", d3.line().x(d=>sPX(d.x_in,y,d.z_in)).y(d=>sPY(d.x_in,y,d.z_in))(topNodes))
+      .attr("fill","none").attr("stroke", stroke).attr("stroke-width", strokeWidth);
+    drawHoweWebs(gr, y, stroke, 1.6);
+    return gr;
+  }
+
+  // -----------------------------
+  // Scene
+  // -----------------------------
+  const yTruss = [0, D_units, 2*D_units];
+  const m0 = D_units/2, m1 = D_units + D_units/2;
+  const yZones = [[0,m0],[m0,m1],[m1,2*D_units]];
+
+  // roof
+  const roofG = g.append("g");
+  ["left","right"].forEach(side=>{
+    const poly = (side==="left"? stripPolyRaw("left",0,2*D_units) : stripPolyRaw("right",0,2*D_units))
+      .map(([X,Y])=>[X+tx, Y+ty]);
+    roofG.append("path")
+      .attr("d", d3.line().curve(d3.curveLinearClosed)(poly))
+      .attr("fill","#9ca3af").attr("fill-opacity",0.12)
+      .attr("stroke","#9ca3af").attr("stroke-opacity",0.30).attr("stroke-width",1);
+  });
+
+  // trusses (middle orangey, back darker green)
+  const trussG = g.append("g");
+  const pastel = ["#93c5fd", "#f59e0b", "#34d399"]; // back darker
+  const vivid  = ["#2563eb", "#d97706", "#059669"]; // hover colors
+  yTruss.forEach((y,i)=> drawHoweTruss(y, trussG, { stroke: pastel[i], strokeWidth: 2.2, className:`truss truss-${i}` }));
+
+  // hover scaffolding
+  const hitG = g.append("g").style("pointer-events","none");
+  const segHits = hitG.append("g").style("pointer-events","all");
+  const HUD = g.append("g").style("pointer-events","none");
+  const hiAreas = HUD.append("g");
+  const hiTruss = HUD.append("g");
+  const dynDims = g.append("g").attr("class","dyn-dims").style("pointer-events","none");
+
+  function stripPoly(side,y0,y1){ return stripPolyRaw(side,y0,y1).map(([X,Y])=>[X+tx, Y+ty]); }
+  const segments = [];
+  ["left","right"].forEach(side=> yZones.forEach((yr,idx)=>segments.push({side,truss:idx,y0:yr[0],y1:yr[1]})));
+  segHits.selectAll("path.segHit")
+    .data(segments).enter().append("path")
+      .attr("class","segHit")
+      .attr("d", d=> d3.line().curve(d3.curveLinearClosed)(stripPoly(d.side,d.y0,d.y1)))
+      .attr("fill","#fff").attr("fill-opacity",0.001)
+      .attr("stroke","none").style("cursor","pointer")
+      .on("mouseenter",(_,d)=>setActive(d.truss))
+      .on("mousemove", (_,d)=>setActive(d.truss))
+      .on("mouseleave", clearActive);
+
+  // -----------------------------
+  // Math panel (M input + dynamic text)
+  // -----------------------------
+  const T_in = Math.hypot(half_in, rise_in);
+  const T_ft = T_in / 12;
+
+  const mathWrap = container.append("div").attr("class","math-wrap")
+    .style("margin","14px 0 0 0");
+
+  const gen = mathWrap.append("div")
+    .style("padding","12px 14px").style("background","#f9fafb")
+    .style("border","1px solid #e5e7eb").style("border-radius","6px")
+    .style("font-family","ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace")
+    .style("font-size","14px").style("line-height","1.5");
+
+  gen.append("div").style("color","#111827").style("margin-bottom","6px")
+    .html("<b>Calculating a truss’s dead load</b>");
+
+  let MVal = 1.0;
+  const ctrl = gen.append("div").style("margin","4px 0 10px 0").style("color","#374151");
+  ctrl.append("span").text("M (weight per unit area): ");
+  const mInput = ctrl.append("input").attr("type","number").attr("step","0.1").attr("value","1.0")
+    .style("width","90px").style("margin-left","6px");
+  ctrl.append("span").style("margin-left","6px").style("color","#6b7280").text("(units/area)");
+
+  gen.append("div").text("Let L = ridge length, T = top-chord true length, M = roof weight per unit area.");
+  gen.append("div").text("For a truss with tributary ridge length b:");
+  gen.append("div").text("  • Total truss load:   W = (2 · T · b) · M");
+  gen.append("div").text("  • Line load on truss: w = W / T = (2 · b) · M");
+  gen.append("div").style("margin-top","6px").text("Here, b = L/4 for an end truss, and b = L/2 for the middle truss.");
+
+  const spec = mathWrap.append("div")
+    .style("margin","10px 0 0 0").style("padding","12px 14px")
+    .style("background","#ffffff").style("border","1px solid #e5e7eb").style("border-radius","6px")
+    .style("font-family","ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace")
+    .style("font-size","14px").style("line-height","1.5");
+
+  const specTitle = spec.append("div").style("margin-bottom","6px").style("color","#111827")
+    .html("<b>Hover over a roof bay to see specific expressions</b>");
+  const specLines = spec.append("div");
+  let currentIdx = null;
+
+  function coefStr(val){ return (Math.round(val*100)/100).toFixed(2); }
+
+  function updateSpecific(idx){
+    specLines.selectAll("*").remove();
+    if(idx === null || idx === undefined){
+      specTitle.html("<b>Hover over a roof bay to see specific expressions</b>");
+      specLines.append("div").style("color","#6b7280").text("No bay selected.");
+      return;
+    }
+    currentIdx = idx;
+    const which = (idx===1) ? "Middle truss" : (idx===0 ? "Right/front end truss" : "Left/back end truss");
+    const bSym = (idx===1) ? "L/2" : "L/4";
+    const vividColor = (idx===1) ? "#d97706" : (idx===0 ? "#2563eb" : "#059669");
+
+    const cW = (idx===1) ? (T_ft * MVal) : (T_ft * MVal / 2); // W = cW * L
+    const cw = (idx===1) ? (1 * MVal)   : (0.5 * MVal);       // w = cw * L
+    specTitle.html(`<b>${which} (tributary)</b>`);
+    specLines.append("div").style("color","#374151")
+      .text(`Given T ≈ ${T_ft.toFixed(2)} ft (${T_in.toFixed(2)} in) and M = ${MVal.toFixed(2)}:`);
+
+    specLines.append("div").style("color", vividColor)
+      .text(`Total load:   W = (2 · T · ${bSym}) · M = (2 · ${T_ft.toFixed(2)} · ${bSym}) · ${MVal.toFixed(2)} = ${coefStr(cW)}·L`);
+    const wExpr = (idx===1) ? "L · M" : "(L/2) · M";
+    specLines.append("div").style("color", vividColor)
+      .text(`Line load:    w = 2 · ${bSym} · M = ${wExpr} = ${coefStr(cw)}·L`);
+  }
+  mInput.on("input", function(){
+    const v = parseFloat(this.value);
+    MVal = Number.isFinite(v) ? v : 1.0;
+    updateSpecific(currentIdx);
+  });
+
+  // -----------------------------
+  // Static dimension tiers + chord true length
+  // -----------------------------
+  const dims = g.append("g").attr("class","dims").style("pointer-events","none");
+
+  // inner tier: L/2 — extension lines are colinear with the bottom chords (unchanged)
+  const extLen = 56, tickLen = 7;
+  const exts = yTruss.map(y=>{
+    const P = [sPX(0,y,0), sPY(0,y,0)];
+    const v = bcDirLeft(y);
+    const E = [P[0] + v[0]*extLen, P[1] + v[1]*extLen];
+    dims.append("line").attr("x1",P[0]).attr("y1",P[1]).attr("x2",E[0]).attr("y2",E[1])
+      .attr("stroke", DIM).attr("stroke-width",1.1);
+    return {y, P, E, v};
+  });
+
+  // connect L/2 spans
+  [[0,1],[1,2]].forEach(([i,j])=>{
+    const A = exts[i].E, B = exts[j].E;
+    dims.append("line").attr("x1",A[0]).attr("y1",A[1]).attr("x2",B[0]).attr("y2",B[1])
+      .attr("stroke", DIM).attr("stroke-width",1.1);
+    addTick(dims, A[0],A[1], exts[i].v[0], exts[i].v[1], tickLen);
+    addTick(dims, B[0],B[1], exts[j].v[0], exts[j].v[1], tickLen);
+    const mid=[(A[0]+B[0])/2,(A[1]+B[1])/2];
+    const w=vnorm(B[0]-A[0],B[1]-A[1]); let n=[-w[1],w[0]];
+    const bcMid=bcDirLeft(yTruss[1]); if(n[0]*bcMid[0]+n[1]*bcMid[1]<0) n=[-n[0],-n[1]];
+    dims.append("text").attr("x", mid[0]+n[0]*12).attr("y", mid[1]+n[1]*12)
+      .attr("text-anchor","middle").attr("fill","#4b5563").style("font-size","12px").text("L/2");
+  });
+
+  // outer tier: L — extension lines must be colinear with chords and meet the L line
+  // compute ridge direction + outward normal from inner E points
+  const wRidge = vnorm(exts[2].E[0]-exts[0].E[0], exts[2].E[1]-exts[0].E[1]);
+  let nOut = [-wRidge[1], wRidge[0]];
+  const bcMid = bcDirLeft(yTruss[1]); if(nOut[0]*bcMid[0]+nOut[1]*bcMid[1]<0) nOut=[-nOut[0],-nOut[1]];
+  const tierOff = 56;
+  const baseOut = [exts[0].E[0] + nOut[0]*tierOff, exts[0].E[1] + nOut[1]*tierOff]; // point on the L line
+
+  // find intersections with the two end extension lines (so extensions are colinear with chords)
+  const I0 = intersectPoint(exts[0].P, exts[0].v, baseOut, wRidge);
+  const I2 = intersectPoint(exts[2].P, exts[2].v, baseOut, wRidge);
+
+  // draw outer extension lines along chord directions to the L line
+  dims.append("line").attr("x1", exts[0].P[0]).attr("y1", exts[0].P[1]).attr("x2", I0[0]).attr("y2", I0[1])
+    .attr("stroke", DIM).attr("stroke-width",1.1);
+  dims.append("line").attr("x1", exts[2].P[0]).attr("y1", exts[2].P[1]).attr("x2", I2[0]).attr("y2", I2[1])
+    .attr("stroke", DIM).attr("stroke-width",1.1);
+
+  // the L dimension line and ticks at those intersection points
+  dims.append("line").attr("x1", I0[0]).attr("y1", I0[1]).attr("x2", I2[0]).attr("y2", I2[1])
+    .attr("stroke", DIM).attr("stroke-width", 1.2);
+  addTick(dims, I0[0],I0[1], exts[0].v[0], exts[0].v[1], 8);
+  addTick(dims, I2[0],I2[1], exts[2].v[0], exts[2].v[1], 8);
+
+  // L label
+  const midL=[(I0[0]+I2[0])/2,(I0[1]+I2[1])/2];
+  dims.append("text")
+    .attr("x", midL[0]+nOut[0]*18).attr("y", midL[1]+nOut[1]*18)
+    .attr("text-anchor","middle").attr("fill","#4b5563").style("font-size","12px").text("L");
+
+  // top-chord true length (above far truss)
+  (function(){
+    const y = yTruss[2];
+    const P = [sPX(0,y,0), sPY(0,y,0)];
+    const Q = [sPX(half_in,y,rise_in), sPY(half_in,y,rise_in)];
+    const t = vnorm(Q[0]-P[0], Q[1]-P[1]); let n=[-t[1],t[0]]; if(n[1]>0) n=[-n[0],-n[1]];
+    const off=80, labelOff=16, tickLen=8;
+    const Pn=[P[0]+n[0]*off, P[1]+n[1]*off], Qn=[Q[0]+n[0]*off, Q[1]+n[1]*off];
+    dims.append("line").attr("x1",Pn[0]).attr("y1",Pn[1]).attr("x2",Qn[0]).attr("y2",Qn[1])
+      .attr("stroke",DIM).attr("stroke-width",1.2);
+    addTick(dims, Pn[0],Pn[1], n[0],n[1], tickLen);
+    addTick(dims, Qn[0],Qn[1], n[0],n[1], tickLen);
+    const label = `Top-chord true length ≈ ${ (T_in/12).toFixed(2) } ft (${ T_in.toFixed(2) } in)`;
+    const ang = Math.atan2(Qn[1]-Pn[1], Qn[0]-Pn[0])*180/Math.PI;
+    const mid=[(Pn[0]+Qn[0])/2,(Pn[1]+Qn[1])/2];
+    dims.append("text").attr("text-anchor","middle")
+      .attr("transform",`translate(${mid[0]+n[0]*labelOff},${mid[1]+n[1]*labelOff}) rotate(${ang})`)
+      .attr("fill","#374151").style("font-size","12px").text(label);
+  })();
+
+  // -----------------------------
+  // Dynamic tributary ridge dimension (colored, coplanar & colinear)
+  // -----------------------------
+  function drawDynamicRidgeDim(idx){
+    dynDims.selectAll("*").remove();
+
+    // choose near/far extension-lines' y-locations
+    let yNear, yFar, label;
+    if (idx===1){ yNear = m0; yFar = m1; label = "L/2"; }
+    else if (idx===0){ yNear = yTruss[0]; yFar = m0; label = "L/4"; }
+    else { yNear = m1; yFar = yTruss[2]; label = "L/4"; }
+
+    // extension-line bases (through heel at x=0 on those y's), directions along bottom chord
+    const Pn = [sPX(0,yNear,0), sPY(0,yNear,0)], vn = bcDirLeft(yNear);
+    const Pf = [sPX(0,yFar, 0), sPY(0,yFar, 0)], vf = bcDirLeft(yFar);
+
+    // dynamic dimension line: parallel to outer L line, farther out by (tierOff + delta),
+    // using a point offset from the inner base at exts[0].E
+    const dynamicOff = tierOff + 36;
+    const baseDyn = [exts[0].E[0] + nOut[0]*dynamicOff, exts[0].E[1] + nOut[1]*dynamicOff];
+
+    // intersections with the two extension lines => endpoints that guarantee colinearity with chords
+    const Inear = intersectPoint(Pn, vn, baseDyn, wRidge);
+    const Ifar  = intersectPoint(Pf, vf, baseDyn, wRidge);
+
+    const col = vivid[idx];
+
+    // draw dynamic extension lines (along chord directions)
+    dynDims.append("line").attr("x1",Pn[0]).attr("y1",Pn[1]).attr("x2",Inear[0]).attr("y2",Inear[1])
+      .attr("stroke", col).attr("stroke-width", 1.6);
+    dynDims.append("line").attr("x1",Pf[0]).attr("y1",Pf[1]).attr("x2",Ifar[0]).attr("y2",Ifar[1])
+      .attr("stroke", col).attr("stroke-width", 1.6);
+
+    // dynamic dimension line + ticks
+    dynDims.append("line").attr("x1",Inear[0]).attr("y1",Inear[1]).attr("x2",Ifar[0]).attr("y2",Ifar[1])
+      .attr("stroke", col).attr("stroke-width", 2.2);
+    addTick(dynDims, Inear[0],Inear[1], vn[0], vn[1], 8);
+    addTick(dynDims, Ifar[0], Ifar[1], vf[0], vf[1], 8);
+
+    // label (pulled farther from the line)
+    const mid=[(Inear[0]+Ifar[0])/2,(Inear[1]+Ifar[1])/2];
+    dynDims.append("text")
+      .attr("x", mid[0] + nOut[0]*26).attr("y", mid[1] + nOut[1]*26) // extra clearance
+      .attr("text-anchor","middle").style("font-size","12px").attr("fill", col)
+      .text(label);
+  }
+  function clearDynamicRidgeDim(){ dynDims.selectAll("*").remove(); }
+
+  // -----------------------------
+  // Hover handlers
+  // -----------------------------
+  function setActive(idx){
+    hiAreas.selectAll("*").remove(); hiTruss.selectAll("*").remove();
+    ["left","right"].forEach(side=>{
+      hiAreas.append("path")
+        .attr("d", d3.line().curve(d3.curveLinearClosed)(stripPoly(side, yZones[idx][0], yZones[idx][1])))
+        .attr("fill", pastel[idx]).attr("fill-opacity", 0.32)
+        .attr("stroke", pastel[idx]).attr("stroke-opacity", 0.85).attr("stroke-width", 1.2);
+    });
+    drawHoweTruss(yTruss[idx], hiTruss, { stroke: vivid[idx], strokeWidth: 3.2, className: "truss-overlay" });
+    drawDynamicRidgeDim(idx);
+    updateSpecific(idx);
+  }
+  function clearActive(){
+    hiAreas.selectAll("*").remove(); hiTruss.selectAll("*").remove();
+    clearDynamicRidgeDim();
+    currentIdx = null;
+    updateSpecific(null);
+  }
+
+  // front eave guide
+  const e0 = [sPX(0,0,0), sPY(0,0,0)], e1 = [sPX(span_in,0,0), sPY(span_in,0,0)];
+  g.append("line")
+    .attr("x1", e0[0]).attr("y1", e0[1]).attr("x2", e1[0]).attr("y2", e1[1])
+    .attr("stroke","#e5e7eb").attr("stroke-width",1.2).attr("stroke-dasharray","3 3");
+
+  // init
+  updateSpecific(null);
+  return container.node();
+}
+
+```

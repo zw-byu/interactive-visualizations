@@ -1,0 +1,15 @@
+/* Keep styles lightweight and readable */
+.coviz { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; }
+.coviz .curve { fill: none; stroke: #333; stroke-width: 2; }
+.coviz .fill-strip { fill: rgba(80, 160, 255, 0.20); stroke: rgba(80,160,255,0.8); }
+.coviz .fill-strip-ref { fill: rgba(255, 140, 80, 0.20); stroke: rgba(255,140,80,0.8); }
+.coviz .riemann { fill: rgba(40,40,40,0.12); stroke: rgba(40,40,40,0.5); }
+.coviz .guide { stroke: #888; stroke-dasharray: 4 4; }
+.coviz .axisline { stroke: #333; stroke-width: 1.5; }
+.coviz .tick { stroke: #333; }
+.coviz .axislabel { font-size: 12px; fill: #333; }
+.coviz .ticklabel { font-size: 12px; fill: #333; }
+.coviz .bracket { stroke: #333; fill: none; }
+.coviz .bracketlabel { font-size: 12px; fill: #333; }
+.readout { margin: .25rem 0 .75rem 0; font-size: .95rem; line-height: 1.3; }
+.connectorlabel { font-size: 11px; fill: #333; }

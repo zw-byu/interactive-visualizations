@@ -1,0 +1,19 @@
+project:
+  type: website
+  output-dir: _site
+
+format:
+  html:
+    number-sections: true
+    html-math-method: mathjax
+    include-in-header:
+      - text: |
+          <script>
+          window.MathJax = {
+            tex: {
+              tags: 'ams', 'html', 'color', 'textmacros'
+            }
+          };
+          </script>
+    math:
+      extensions: ["color", "textmacros", "html"]

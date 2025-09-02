@@ -4,7 +4,12 @@ __pycache__/
 _book/
 _quarto/
 /.quarto/
+.quarto/
 
 .vscode/*
 
 _archive/
+index_files/
+*_files/
+_site/
+_dev/

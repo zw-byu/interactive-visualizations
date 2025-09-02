@@ -1,0 +1,621 @@
+---
+title: "Interactive function approximation"
+format: 
+  html:
+    css: styles.css
+execute:
+  echo: false
+---
+
+<!-- ##### Background {.unnumbered} -->
+::: {.content width=600 style="font-size:0.85rem;"}
+As Hughes describes in §1.6, we can approximate each of the functions $w^{h}\in\mathscr{V}^{h}$ using a (piecewise) **linear combination** of basis functions; i.e.
+
+$$
+\small{w^{h}\; = \; \sum_{A=1}^{n} c_A N_A(x) }
+$$
+
+where $n$ is the number of basis functions entailed by (i) the number of elements into which we divide the domain, together with (ii) the type and polynomial order of the $N_A$ chosen. 
+
+In the plot below: 
+
+* $w^{h}$ is represented by the black line, which displays an arbitrary "target function" (here, $\small{f(x)=4+\sin(2\pi x)+0.8\,\sin(6\pi x)+4x(1-x),\; x\in[0,1]}$). 
+* The $N_A$ are Lagrange basis functions of the order chosen in the "Degree" dropdown menu. 
+* The constants $c_A$ are the current values of the "c1" to "cN" input fields. These are initially set to a default $c_A = 2$. 
+* The dashed gray line (initially at $y=2$) shows the linear combination resulting from currently-specified values of $c_A N_A$.
+
+##### Objective
+After specifying the number of elements and basis degree, try to approximate the target function by adjusting the coefficient values in the "cN" input fields. Compare the results of increasing the polynomial degree versus increasing the number of elements.
+:::
+<p>
+<!-- The "Best fit ($L^2$)" button computes the least-squares coefficients  -->
+<!-- $c_A$ minimizing $\int_{0}^{1} f_{target}(x) - \sum_{A} (c_A N_A(x))^{2} \; dx$, proceeding by solving matrix system $Mc=b$ using 5-point Gauss-Legendre quadrature and Cholesky factorization.  -->
+
+
+```{ojs}
+d3 = require("d3@7")
+```
+
+```{ojs}
+{
+  // ---------- Parameters ----------
+  let numElems = 6;                 // controlled by input
+  let degree  = 2;                  // 1..5
+  let basisType = "lagrange";       // "lagrange" | "bernstein"
+  const width = 900, height = 520;  // plot area (px, excluding inputs)
+  const bottomPad = 140;            // space for 2 rows of inputs
+  const margin = {top: 30, right: 30, bottom: 140, left: 50};
+
+  // High-saturation (non-red) palette, ≥10 colors
+  const basisPalette = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#9467bd", "#8c564b",
+    "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#4f46e5",
+    "#10b981", "#f59e0b", "#14b8a6", "#6d28d9"
+  ];
+
+  // Target function selection
+  let targetChoice = "nonlinear";   // "nonlinear" | "linear" | "sine" | "exp" | "erf" | "poly3"
+  let linA = 0.0, linB = 2.0;       // linear defaults
+
+  // ---------- Container (stacked layout: header rows, then viz) ----------
+  const container = document.createElement("div");
+  Object.assign(container.style, {
+    width: `${width}px`,
+    display: "flex",
+    "flex-direction": "column",
+    gap: "8px",
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  });
+
+  // Header wrapper (stack bars aligned with left plot margin)
+  const header = d3.select(container).append("div")
+    .style("display", "flex")
+    .style("flex-direction", "column")
+    .style("gap", "8px")
+    .style("align-items", "flex-start")
+    .style("margin-left", `${margin.left}px`);
+
+  // ---------- Topbar: mesh + degree + basis controls ----------
+  const topbar = header.append("div")
+    .style("display", "flex")
+    .style("gap", "10px")
+    .style("align-items", "center")
+    .style("background", "#fff")
+    .style("padding", "6px 12px")
+    .style("border", "1px solid #e5e7eb")
+    .style("border-radius", "10px")
+    .style("box-shadow", "0 1px 1px rgba(0,0,0,0.04)");
+
+  topbar.append("span").style("font-size", "12px").style("color", "#111827").text("Number of elements:");
+  const numInput = topbar.append("input")
+    .attr("type", "number").attr("min", "2").attr("max", "60").attr("step", "1").attr("value", numElems)
+    .style("width", "72px").style("padding", "4px 6px")
+    .style("border", "1px solid #d1d5db").style("border-radius", "6px").style("font-size", "12px");
+
+  topbar.append("span").style("font-size", "12px").style("color", "#111827").text("Degree:");
+  const degreeSelect = topbar.append("select")
+    .style("padding", "4px 6px").style("border", "1px solid #d1d5db").style("border-radius", "6px").style("font-size", "12px");
+  [
+    {label:"P1 (Linear)", value:1},
+    {label:"P2 (Quadratic)", value:2},
+    {label:"P3 (Cubic)", value:3},
+    {label:"P4 (Quartic)", value:4},
+    {label:"P5 (Quintic)", value:5},
+  ].forEach(opt => degreeSelect.append("option").attr("value", opt.value).text(opt.label));
+  degreeSelect.property("value", degree);
+
+  topbar.append("span").style("font-size", "12px").style("color", "#111827").text("Basis:");
+  const basisSelect = topbar.append("select")
+    .style("padding", "4px 6px").style("border", "1px solid #d1d5db").style("border-radius", "6px").style("font-size", "12px");
+  [{label:"Lagrange (nodal)", value:"lagrange"},
+   {label:"Bernstein (per element)", value:"bernstein"}]
+    .forEach(opt => basisSelect.append("option").attr("value", opt.value).text(opt.label));
+  basisSelect.property("value", basisType);
+
+  // ---------- Target function bar (under element/degree/basis) ----------
+  const tbar = header.append("div")
+    .style("display", "flex")
+    .style("flex-wrap", "wrap")
+    .style("gap", "10px")
+    .style("align-items", "center")
+    .style("background", "#fff")
+    .style("padding", "6px 12px")
+    .style("border", "1px solid #e5e7eb")
+    .style("border-radius", "10px")
+    .style("box-shadow", "0 1px 1px rgba(0,0,0,0.04)");
+
+  tbar.append("span").style("font-size", "12px").style("color", "#111827").text("Target function:");
+
+  const targetSelect = tbar.append("select")
+    .style("padding", "4px 6px").style("border", "1px solid #d1d5db").style("border-radius", "6px").style("font-size", "12px");
+  [
+    {label:"Original (nonlinear)", value:"nonlinear"},
+    {label:"Linear: a·x + b", value:"linear"},
+    {label:"Sine: sin(2πx)", value:"sine"},
+    {label:"Exponential: e^x", value:"exp"},
+    {label:"Error function: erf(x)", value:"erf"},
+    {label:"Cubic: -2x³+3x²−x+4", value:"poly3"},
+  ].forEach(opt => targetSelect.append("option").attr("value", opt.value).text(opt.label));
+  targetSelect.property("value", targetChoice);
+
+  const linWrap = tbar.append("span").style("display","none").style("gap","6px").style("align-items","center");
+  linWrap.append("span").style("font-size","12px").text("a:");
+  const linAInput = linWrap.append("input")
+    .attr("type","number").attr("step","0.1").attr("value", linA)
+    .style("width","70px").style("padding","4px 6px")
+    .style("border","1px solid #d1d5db").style("border-radius","6px").style("font-size","12px");
+  linWrap.append("span").style("font-size","12px").text("b:");
+  const linBInput = linWrap.append("input")
+    .attr("type","number").attr("step","0.1").attr("value", linB)
+    .style("width","70px").style("padding","4px 6px")
+    .style("border","1px solid #d1d5db").style("border-radius","6px").style("font-size","12px");
+
+  // ---------- Action bar: Reset / L2 / Interpolate / Scale toggle ----------
+  const ctrlbar = header.append("div")
+    .style("display","flex")
+    .style("gap","8px")
+    .style("align-items", "center")
+    .style("background","#fff")
+    .style("padding","6px 12px")
+    .style("border","1px solid #e5e7eb")
+    .style("border-radius","10px")
+    .style("box-shadow","0 1px 1px rgba(0,0,0,0.04)");
+
+  let api = {}; // hooks filled in buildViz
+
+  ctrlbar.append("button")
+    .text("Reset cA = 2")
+    .style("padding","6px 10px").style("font-size","12px")
+    .style("border","1px solid #d1d5db").style("border-radius","8px")
+    .style("background","#f3f4f6").style("color","#000").style("cursor","pointer")
+    .on("click", () => api.reset && api.reset());
+
+  ctrlbar.append("button")
+    .text("Best fit (L²)")
+    .style("padding","6px 10px").style("font-size","12px")
+    .style("border","1px solid #d1d5db").style("border-radius","8px")
+    .style("background","#e0e7ff").style("color","#000").style("cursor","pointer")
+    .on("click", () => api.bestFit && api.bestFit());
+
+  // ctrlbar.append("button")
+  //   .text("Interpolate (nodal)")
+  //   .style("padding","6px 10px").style("font-size","12px")
+  //   .style("border","1px solid #d1d5db").style("border-radius","8px")
+  //   .style("background","#dcfce7").style("color","#000").style("cursor","pointer")
+  //   .on("click", () => api.interpolate && api.interpolate());
+
+  // Interpolate / Match-control-points (dynamic label)
+  const interpBtn = ctrlbar.append("button")
+    .style("padding","6px 10px").style("font-size","12px")
+    .style("border","1px solid #d1d5db").style("border-radius","8px")
+    .style("background","#dcfce7").style("color","#000").style("cursor","pointer")
+    .on("click", () => api.interpolate && api.interpolate());
+
+  // Helper to set the label based on basisType
+  function setInterpLabel() {
+    const bez = (basisType === "bernstein");
+    interpBtn
+      .text(bez ? "Match control points (Bézier)" : "Interpolate (nodal)")
+      .attr("title", bez
+        ? "Set c_A to f_target at Bézier control-point abscissae"
+        : "Set c_A to f_target at nodal abscissae x_A");
+  }
+  setInterpLabel(); // initial label
+
+  const scaleBtn = ctrlbar.append("button")
+    .text("Scale bases by cₐ: OFF")
+    .style("padding","6px 10px").style("font-size","12px")
+    .style("border","1px solid #d1d5db").style("border-radius","8px")
+    .style("background","#fee2e2").style("color","#000").style("cursor","pointer");
+
+  let scaleBases = false;
+  scaleBtn.on("click", () => {
+    scaleBases = !scaleBases;
+    scaleBtn.text(`Scale bases by cₐ: ${scaleBases ? "ON" : "OFF"}`)
+            .style("background", scaleBases ? "#fde68a" : "#fee2e2");
+    api.renderHats && api.renderHats();
+  });
+
+  // ---------- Viz root ----------
+  const vizRoot = d3.select(container).append("div")
+    .style("position", "relative")
+    .style("width", `${width}px`)
+    .style("height", `${height + bottomPad}px`);
+
+  // UI events
+  numInput.on("change", (e) => {
+    const v = Math.max(2, Math.min(60, Math.round(+e.target.value || 2)));
+    if (v !== numElems) { numElems = v; e.target.value = v; buildViz(); }
+  });
+  degreeSelect.on("change", (e) => { degree = +e.target.value || 1; buildViz(); });
+  // basisSelect.on("change", (e) => { basisType = e.target.value; buildViz(); });
+  basisSelect.on("change", (e) => {
+    basisType = e.target.value;
+    setInterpLabel();   // update button text
+    buildViz();
+  });
+
+  targetSelect.on("change", (e) => {
+    targetChoice = e.target.value;
+    linWrap.style("display", targetChoice === "linear" ? "inline-flex" : "none");
+    api.renderTarget && api.renderTarget();
+  });
+  linAInput.on("input", e => { linA = +e.target.value || 0; api.renderTarget && api.renderTarget(); });
+  linBInput.on("input", e => { linB = +e.target.value || 0; api.renderTarget && api.renderTarget(); });
+
+  buildViz();
+
+  function buildViz() {
+    vizRoot.selectAll("*").remove();
+
+    const plotW = width - margin.left - margin.right;
+
+    // ----- Mesh & nodes -----
+    const h = 1 / numElems;
+    const p = degree;                 // degree 1..5
+    const n = numElems * p + 1;       // global control points / dofs
+    const allNodes = d3.range(n).map(k => k / (numElems * p));
+    const endpoints = d3.range(numElems + 1).map(i => i / numElems);
+    const endpointKeys = new Set(endpoints.map(x => x.toFixed(10)));
+    const internalNodes = allNodes.filter(x => !endpointKeys.has(x.toFixed(10)));
+
+    // Coefficients start at 2 ⇒ constant 2 for both bases
+    let coeffs = Array(n).fill(2);
+
+    // ----- Scales & axes -----
+    const xScale = d3.scaleLinear().domain([0,1]).range([margin.left, width - margin.right]);
+    const yMin = -1, yMax = 7;
+    const yScale = d3.scaleLinear().domain([yMin, yMax]).range([height - margin.bottom, margin.top]);
+
+    const svg = vizRoot.append("svg")
+      .attr("viewBox", [0, 0, width, height])
+      .attr("width", width)
+      .attr("height", height)
+      .style("background", "white");
+
+    // Element zebra background
+    svg.append("g").selectAll("rect")
+      .data(d3.range(numElems))
+      .join("rect")
+        .attr("x", j => xScale(j*h))
+        .attr("y", yScale(yMax))
+        .attr("width", j => xScale((j+1)*h) - xScale(j*h))
+        .attr("height", yScale(yMin) - yScale(yMax))
+        .attr("fill", j => (j % 2 ? "#fafafa" : "none"));
+
+    // Axes
+    svg.append("g")
+      .attr("transform", `translate(0,${height - margin.bottom})`)
+      .call(d3.axisBottom(xScale).tickValues(endpoints).tickFormat(d3.format(".2f")));
+    svg.append("g")
+      .attr("transform", `translate(${margin.left},0)`)
+      .call(d3.axisLeft(yScale));
+
+    // Axis labels (y centered vertically)
+    svg.append("text")
+      .attr("x", margin.left + (width - margin.left - margin.right)/2)
+      .attr("y", height - margin.bottom + 40)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#374151")
+      .text("x ∈ [0, 1]");
+
+    const yMid = margin.top + (height - margin.top - margin.bottom)/2;
+    svg.append("text")
+      .attr("transform", `translate(18,${yMid}) rotate(-90)`)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#374151")
+      .text("y");
+
+    // Element borders + internal guides
+    svg.append("g").selectAll("line")
+      .data(endpoints).join("line")
+        .attr("x1", d => xScale(d)).attr("x2", d => xScale(d))
+        .attr("y1", yScale(yMin)).attr("y2", yScale(yMax))
+        .attr("stroke", "#9ca3af").attr("stroke-width", 1.8);
+    svg.append("g").selectAll("line")
+      .data(internalNodes).join("line")
+        .attr("x1", d => xScale(d)).attr("x2", d => xScale(d))
+        .attr("y1", yScale(yMin)).attr("y2", yScale(yMax))
+        .attr("stroke", "#e5e7eb").attr("stroke-dasharray", "3,4");
+
+    // ----- Local basis definitions on ξ∈[0,1] -----
+    const Xi = d3.range(p+1).map(i => i/p);  // equispaced local nodes for Lagrange
+
+    // Precompute binomial coefficients for Bernstein
+    const binom = (nn, kk) => {
+      if (kk < 0 || kk > nn) return 0;
+      let res = 1;
+      for (let i = 1; i <= kk; ++i) res = (res * (nn - (kk - i))) / i;
+      return res;
+    };
+    const C = Array.from({length:p+1}, (_, i) => binom(p, i));
+
+    function N_local_lagrange(i, ξ) {
+      let val = 1, xi_i = Xi[i];
+      for (let m = 0; m <= p; ++m) if (m !== i) val *= (ξ - Xi[m]) / (xi_i - Xi[m]);
+      return val;
+    }
+    function N_local_bernstein(i, ξ) {
+      return C[i] * Math.pow(ξ, i) * Math.pow(1 - ξ, p - i);
+    }
+    function N_local(i, ξ) {
+      return basisType === "bernstein" ? N_local_bernstein(i, ξ) : N_local_lagrange(i, ξ);
+    }
+
+    function N_global(A, x) {
+      let j = Math.floor((x - 1e-12) / h);
+      j = Math.max(0, Math.min(numElems - 1, j));
+      const ξ = (x - j*h) / h;  // in [0,1]
+      const i = A - j*p;
+      if (i >= 0 && i <= p) return N_local(i, ξ);
+      return 0;
+    }
+
+    // ----- Target function set -----
+    function erf(x) { // Abramowitz & Stegun 7.1.26
+      const sign = x < 0 ? -1 : 1; const a = Math.abs(x);
+      const t = 1 / (1 + 0.3275911 * a);
+      const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a*a);
+      return sign * y;
+    }
+    function f_target(x) {
+      switch (targetChoice) {
+        case "linear": return linA * x + linB;
+        case "sine":   return Math.sin(2 * Math.PI * x);
+        case "exp":    return Math.exp(x);
+        case "erf":    return erf(x);
+        case "poly3":  return -2*Math.pow(x,3) + 3*Math.pow(x,2) - x + 4;
+        case "nonlinear":
+        default:       return 4 + Math.sin(2*Math.PI*x) + 0.8*Math.sin(6*Math.PI*x) + 4*x*(1 - x);
+      }
+    }
+    function f_approx(x) { let s = 0; for (let A = 0; A < n; ++A) s += coeffs[A] * N_global(A, x); return s; }
+
+    const X = d3.range(0, 1 + 1e-6, 1/400);
+    const line = d3.line().x(d => xScale(d.x)).y(d => yScale(d.y));
+
+    // Basis curves + colored labels (refs kept for re-render)
+    const hatsG = svg.append("g");
+    const hatPaths = [], hatLabels = [];
+    for (let A = 0; A < n; ++A) {
+      const col = basisPalette[A % basisPalette.length];
+      const path = hatsG.append("path")
+        .attr("fill", "none")
+        .attr("stroke", col)
+        .attr("stroke-width", 1.6)
+        .attr("opacity", 0.9);
+      hatPaths.push(path);
+
+      const label = svg.append("text")
+        .attr("x", xScale(allNodes[A]))
+        .attr("text-anchor", "middle")
+        .attr("fill", col)
+        .style("font-size", "10px")
+        .text(`N${A+1}`);
+      hatLabels.push(label);
+    }
+
+    // Target (#6D6D6D) & approximation (red dashed) + legend
+    const targetPath = svg.append("path")
+      .attr("fill", "none")
+      .attr("stroke", "#6D6D6D")
+      .attr("stroke-width", 2.5)
+      .attr("opacity", 0.95);
+
+    const approxPath = svg.append("path")
+      .attr("fill", "none")
+      .attr("stroke", "#6d6d6d")
+      .attr("stroke-width", 2.5)
+      .attr("stroke-dasharray", "6,4")
+      .attr("opacity", 0.95);
+
+    const legend = svg.append("g")
+      .attr("transform", `translate(${width - margin.right - 180}, ${margin.top + 6})`);
+    legend.append("rect")
+      .attr("width", 170).attr("height", 36).attr("rx", 8)
+      .attr("fill", "#ffffff").attr("stroke", "#d1d5db").attr("opacity", 0.95);
+    legend.append("line").attr("x1", 10).attr("x2", 34).attr("y1", 12).attr("y2", 12)
+      .attr("stroke", "#6D6D6D").attr("stroke-width", 2.5);
+    legend.append("text").attr("x", 40).attr("y", 12).attr("dy", "0.35em")
+      .attr("fill", "#111827").style("font-size", "12px").text("Target function");
+    legend.append("line").attr("x1", 10).attr("x2", 34).attr("y1", 24).attr("y2", 24)
+      .attr("stroke", "#6d6d6d").attr("stroke-width", 2.5).attr("stroke-dasharray","6,4");
+    legend.append("text").attr("x", 40).attr("y", 24).attr("dy", "0.35em")
+      .attr("fill", "#111827").style("font-size", "12px").text("Approximation");
+
+    // ----- Coefficient inputs (staggered two rows; labels colored like basis) -----
+    const axisLabelOffset = 40;     // space for x-axis label
+    const gapBelowAxisLabel = 22;   // extra space between ticks and c_A labels
+    const inputsTopRow = height - margin.bottom + axisLabelOffset + gapBelowAxisLabel;
+    const rowGap = 46;              // vertical offset for even-numbered A
+
+    const overlay = vizRoot.append("div")
+      .style("position", "absolute")
+      .style("inset", "0 0 0 0")
+      .style("pointer-events", "none");
+
+    const inputsRow = overlay.append("div")
+      .style("position", "absolute")
+      .style("left", `${margin.left}px`)
+      .style("top", `0px`)
+      .style("width", `${plotW}px`)
+      .style("height", `${bottomPad}px`);
+
+    allNodes.forEach((x, i) => {
+      const left = x*plotW - 32;
+      const A = i + 1;
+      const isEvenA = (A % 2 === 0);
+      const top = (isEvenA ? inputsTopRow + rowGap : inputsTopRow);
+      const col = basisPalette[i % basisPalette.length];
+
+      const cell = inputsRow.append("div")
+        .style("position", "absolute")
+        .style("left", `${left}px`)
+        .style("top", `${top}px`)
+        .style("width", "64px")
+        .style("text-align", "center")
+        .style("pointer-events", "auto");
+
+      cell.append("label")
+        .style("display", "block")
+        .style("font-size", "11px")
+        .style("margin-bottom", "6px")
+        .style("color", col)
+        .text(`c${A}`);
+
+      const input = cell.append("input")
+        .attr("class", "coeff-input")
+        .attr("type", "number")
+        .attr("step", "0.1")
+        .attr("min", "-5")
+        .attr("max", "8")
+        .attr("value", coeffs[i])
+        .style("width", "64px")
+        .style("padding", "4px 6px")
+        .style("border", "1px solid #d1d5db")
+        .style("border-radius", "6px")
+        .style("box-shadow", "0 1px 0 rgba(0,0,0,0.02)")
+        .style("font-size", "12px")
+        .style("background", "#fff");
+
+      input.on("input", (event) => {
+        const val = parseFloat(event.target.value);
+        coeffs[i] = Number.isFinite(val) ? val : 0;
+        renderApprox();
+        if (scaleBases) api.renderHats();
+      });
+    });
+
+    // ----- API hooks for the action bar -----
+    api.reset = () => {
+      coeffs = Array(n).fill(2);
+      vizRoot.selectAll("input.coeff-input").property("value", 2);
+      renderApprox();
+      api.renderHats();
+    };
+    api.bestFit = () => {
+      const {gp, gw} = getGL(p <= 3 ? 5 : 6);   // 5-pt for P1–P3, 6-pt for P4–P5
+      const {M, b} = assembleMassAndLoad(gp, gw);
+      const cFit = choleskySolve(M, b);
+      coeffs = cFit.slice();
+      const fmt = d3.format(".3f");
+      vizRoot.selectAll("input.coeff-input")
+        .each(function(_, i){ d3.select(this).property("value", fmt(coeffs[i])); });
+      renderApprox();
+      api.renderHats();
+    };
+    api.interpolate = () => {
+      // For Lagrange: nodal interpolation. For Bernstein: match control-point ordinates.
+      coeffs = allNodes.map(f_target);
+      const fmt = d3.format(".3f");
+      vizRoot.selectAll("input.coeff-input")
+        .each(function(_, i){ d3.select(this).property("value", fmt(coeffs[i])); });
+      renderApprox();
+      api.renderHats();
+    };
+    api.renderHats = () => {
+      for (let A = 0; A < n; ++A) {
+        const data = X.map(x => {
+          const base = N_global(A, x);
+          return {x, y: scaleBases ? coeffs[A] * base : base};
+        });
+        hatPaths[A].attr("d", line(data));
+
+        // put label near the basis' local maximum
+        const iLocal = (A % p === 0 && A !== 0) ? 0 : (A % p); // careful w/ multiples of p
+        const xiStar = (basisType === "bernstein") ? (iLocal / p) : 1; // Lagrange peaks at 1
+        const yStar = (basisType === "bernstein")
+          ? (scaleBases ? coeffs[A] : 1) * C[iLocal] * Math.pow(xiStar, iLocal) * Math.pow(1 - xiStar, p - iLocal)
+          : (scaleBases ? coeffs[A] : 1);
+        hatLabels[A].attr("y", yScale(yStar) - 6);
+      }
+    };
+    api.renderTarget = () => {
+      const targetData = X.map(x => ({x, y: f_target(x)}));
+      targetPath.attr("d", line(targetData));
+    };
+
+    // ----- Initial renders -----
+    api.renderHats();
+    api.renderTarget();
+    renderApprox();
+
+    function renderApprox() {
+      const data = X.map(x => ({x, y: f_approx(x)}));
+      approxPath.attr("d", line(data));
+    }
+
+    // === Least-squares assembly (Gauss–Legendre) ===
+    function assembleMassAndLoad(gp, gw) {
+      const M = Array.from({length:n}, () => Array(n).fill(0));
+      const b = Array(n).fill(0);
+
+      for (let j = 0; j < numElems; ++j) {
+        const xL = j*h;
+        const gIdx = d3.range(p+1).map(i => j*p + i);
+        for (let q = 0; q < gp.length; ++q) {
+          const ξ = gp[q], w = gw[q];
+          const J = h, x = xL + h*ξ;
+
+          const Nv = d3.range(p+1).map(i => N_local(i, ξ));
+          const ft = f_target(x);
+
+          for (let a = 0; a <= p; ++a) {
+            const A = gIdx[a];
+            b[A] += J * w * ft * Nv[a];
+            for (let bb = 0; bb <= p; ++bb) {
+              const B = gIdx[bb];
+              M[A][B] += J * w * Nv[a] * Nv[bb];
+            }
+          }
+        }
+      }
+      for (let i = 0; i < n; ++i) M[i][i] += 1e-12;
+      return {M, b};
+    }
+
+    // === Gauss–Legendre nodes/weights on [0,1] ===
+    function getGL(nPts) {
+      if (nPts === 6) {
+        const x = [0.033765242898424, 0.169395306766868, 0.380690406958402,
+                   0.619309593041598, 0.830604693233132, 0.966234757101576];
+        const w = [0.085662246189585, 0.180380786524069, 0.233956967286345,
+                   0.233956967286345, 0.180380786524069, 0.085662246189585];
+        return {gp: x, gw: w};
+      }
+      const x = [0.046910077030668, 0.230765344947158, 0.5, 0.769234655052842, 0.953089922969332];
+      const w = [0.118463442528095, 0.239314335249683, 0.284444444444444, 0.239314335249683, 0.118463442528095];
+      return {gp: x, gw: w};
+    }
+
+    // === Cholesky solver (SPD) ===
+    function choleskySolve(A, b) {
+      const n = A.length;
+      const M = Array.from({length:n}, (_, i) => A[i].slice());
+      const L = Array.from({length:n}, () => Array(n).fill(0));
+      for (let i = 0; i < n; ++i) {
+        for (let j = 0; j <= i; ++j) {
+          let s = 0; for (let k = 0; k < j; ++k) s += L[i][k] * L[j][k];
+          if (i === j) { let v = M[i][i] - s; if (v <= 0) v = 1e-15; L[i][j] = Math.sqrt(v); }
+          else { L[i][j] = (M[i][j] - s) / L[j][j]; }
+        }
+      }
+      const y = Array(n).fill(0);
+      for (let i = 0; i < n; ++i) { let s = 0; for (let k = 0; k < i; ++k) s += L[i][k] * y[k]; y[i] = (b[i] - s) / L[i][i]; }
+      const x = Array(n).fill(0);
+      for (let i = n - 1; i >= 0; --i) { let s = 0; for (let k = i + 1; k < n; ++k) s += L[k][i] * x[k]; x[i] = (y[i] - s) / L[i][i]; }
+      return x;
+    }
+  }
+
+  // Return the element to render it
+  return container;
+}
+
+```
+
+<style>
+main.content {
+	width: 900px;
+}
+</style>

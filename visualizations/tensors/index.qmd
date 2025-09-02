@@ -1,0 +1,195 @@
+---
+title: Glossary main
+format: html
+
+---
+
+{{< include _math_macros.qmd >}}
+
+{{< include tensorviz_text.qmd >}}
+
+## Tensors 
+
+
+- Algebraic object (wiki)
+- Abstractly: maps between sets of other algebraic objects in a vector space.
+- More concretely: an n-dimensional array. 
+  - Example: a Cartesian vector
+		- Array: x, y, z components. Or equivalently, with $x_i, i=1,2,3$, 
+$$
+\begin{bmatrix}
+x_1 & x_2 & x_3 \\
+\end{bmatrix}
+$$ {#eq-ex-cartvec}
+
+	- Example: an $i\times j$ matrix
+$$
+\begin{bmatrix}
+n_{11} & n_{12} & n_{13} \\
+n_{21} & n_{22} & n_{23} \\
+n_{31} & n_{32} & n_{33} \\
+\end{bmatrix}
+$$ {#eq-ex-matrix}
+
+### Tensor orders 0-3
+
+The *order* (or *degree*) of a tensor corresponds with the number of dimensions when considered as an array: 
+
+- Cartesian $3\times 1$ vector: 1st-order tensor
+- $i\times j$ matrix: 2nd-order tensor
+
+We can also talk about:
+ 
+- **0th-order tensors**: scalars / ordinary numbers
+- Cartesian vector: 1st-order tensor
+- $i\times j$ matrix: 2nd-order tensor
+- **3rd-order tensors**: three-dimensional $i\times j\times k$ arrays
+- **4th-order and higher-order tensors**: more on this below.
+<!-- multiple three-dimensional arrays -- that is, arrays of dimensions $i\times j\times k\times l$  -->
+<!-- - And tensors of increasingly higher order. -->
+
+
+### Higher-order tensors
+Very briefly for now, consider, from the $n$-dimensional array standpoint, the meaning of increasing a tensor's order. 
+
+- 0th order tensor: a scalar $\gamma$; $1\times 1$ array.
+- 1st order: $n$ multiples of a 0th-order tensor $n$; thus an $n\times 1$ array
+- 2nd order: $m$ multiples of a 1st-order tensor, resulting in an array of $m\times (n\times 1)\eq m\times n$. The components of a 2nd-order tensor thus take two indices each: $t_{ij}$ where the values of $i$ and $j$ indicate the component's $x_1$ and $x_2$ positions, respectively. 
+
+From this it's not surprising that a 3rd-order tensor consists of $p$ multiples of a 2nd-order tensor, thus an array of $(m\times n)\times p \eq m\times n\times p$. 
+Below is an illustration of the array representation of a $3\times 3\times 3$ 3rd-order tensor. Each component labeled with subscripts $t_{ijk}$ indicating its position on the $x_1$, $x_2$, and $x_3$ dimensions, respectively:
+
+<!-- ```{python}
+#|echo: false
+plot_4th_order_tensor(block_count=1)
+``` -->
+
+Q: Given this pattern, what should a 4th-order tensor look like? 
+A: Following the pattern we've seen for orders 0-3, we should expect a 4th-order tensor to consist of $q$ multiples of a 3rd-order tensor. That is, we should expect an array of $(m\times n\times p)\times q \eq m\times n\times p\times q$.
+
+Each component of a 4th-order tensor would thus take an additional subscript, giving the form $t_{ijkl}$ a 3x3x3x3 4th-order tensor would look like this: 
+
+<!-- ```{python}
+#|echo: false
+plot_4th_order_tensor(block_count=3)
+``` -->
+
+--> Link to visualization of the matricization of 4+ order tensors. 
+<!-- Representing components as colored cubes this time, we can represent the 4th-order tensor as multiple, separately-indexed 3rd-order tensors:  -->
+
+
+
+### Tensor notation
+
+Printed symbolic notation: lowercase bold for 1st-order tensors (vectors); uppercase bold for tensors of order 2 or greater. 
+
+In the classroom and other contexts involving references to tensors written by hand, bolding is replaced by (stacked) underset accents -- either lines or tildes (`~`). The number of underset accents is equal to the order of the tensor. 
+
+| Tensor order | Array representation              | Printed symbols                     | Written symbols                     |
+|--------------|-----------------------------------|-------------------------------------|-------------------------------------|
+| 0 (scalar)   | $n$                               | $\pi, 42, \mathrm{e}$               | $\pi, 42, \mathrm{e}$               | 
+| 1 (vector)   | $n\times 1$                       | $\TensorSymbolicPrintedBold{v}$     | $\TensorSymbolicWrittenOrderI{v}$   | 
+| 2 (matrix)   | $n\times p$                       | $\TensorSymbolicPrintedBold{M}$     | $\TensorSymbolicWrittenOrderII{M}$   | 
+| 3            | $n\times p\times q$               | $\TensorSymbolicPrintedBold{T}$     | $\TensorSymbolicWrittenOrderIII{T}$   | 
+| 4            | $n\times p\times q\times r$       | $\TensorSymbolicPrintedBold{C}$     | $\TensorSymbolicWrittenOrderIV{C}$   | 
+
+
+(Mention ISO conventions, as Mase says he's following those? (add uppercase script?))
+
+### Indicial notation
+
+<!-- I admire the elegance of your method of computation; it must be nice to ride through these fields upon the horse of true mathematics while the like of us have to make our way laboriously on foot" -->
+
+
+### Preliminary: The summation convention
+
+While in general, a vector is an $n\times 1$ array, we in fact usually mean a $3\times 1$ array. That's because we are primarily talking about mechanics occurring in physical (Euclidian) space described by a Cartesian coordinate system. 
+
+That means that in the array-representation of a vector, the array values represent the scalar coefficients by which Cartesian unit vectors must be multiplied to produce the vector: 
+
+$$
+\TensorSymbolicPrintedBold{v} \eq \begin{bmatrix}v_1 \\ v_2 \\ v_3\end{bmatrix} \eq v_1\CartesianUnitVectorIndexed[1] + v_2\CartesianUnitVectorIndexed[2] + v_3\CartesianUnitVectorIndexed[3] \eq \sum_{i=1}^{3} v_i\CartesianUnitVectorIndexed[i]
+$$
+
+<!-- Thus the symbolic notation for a vector, $\TensorSymbolicPrintedBold{v}$, is understood to stand for the component form $\sum_{i=1}^{3} v_i\CartesianUnitVectorIndexed[i]$. -->
+
+The *summation convention* is just a shortcut for this kind of *representation in component form*, in which we agree to take the Cartesian basis as implicitly in effect, so that:  
+
+$$
+v_i\CartesianUnitVectorIndexed[i]
+$$
+is always understood as equivalent to
+$$
+v_1\CartesianUnitVectorIndexed[1] + v_2\CartesianUnitVectorIndexed[2] + v_3\CartesianUnitVectorIndexed[3]
+$$
+
+Stated generally, the summation convention is: **we automatically sum from 1 to 3 any indices that appear twice in a term.** 
+
+Examples: 
+
+$$
+\begin{align}
+u_i v_i w_j \CartesianUnitVectorIndexed[j] 	\eqq u_1 v_1 w_j \CartesianUnitVectorIndexed[j] + u_2 v_2 w_j \CartesianUnitVectorIndexed[j] + u_3 v_3 w_j \CartesianUnitVectorIndexed[j] \textcolor{gray}{\quad \leftarrow i=1,2,3} \\
+																						\eqq 
+																							\begin{aligned}[t] 
+																								&u_1 v_1 w_1\CartesianUnitVectorIndexed[1] + u_1 v_1 w_2\CartesianUnitVectorIndexed[2] + u_1 v_1 w_3\CartesianUnitVectorIndexed[3] \textcolor{gray}{\quad \leftarrow i=1, j= 1,2,3}\\
+																								&+ u_2 v_2 w_1\CartesianUnitVectorIndexed[1] + u_2 v_2 w_2\CartesianUnitVectorIndexed[2] + u_2 v_2 w_3\CartesianUnitVectorIndexed[3] \textcolor{gray}{\quad \leftarrow i=2, j= 1,2,3}\\
+																								&+ u_3 v_3 w_1\CartesianUnitVectorIndexed[1] + u_3 v_3 w_2\CartesianUnitVectorIndexed[2] + u_3 v_3 w_3\CartesianUnitVectorIndexed[3] \textcolor{gray}{\quad \leftarrow i=3, j= 1,2,3}
+																								\end{aligned} \\\\
+t_{ij} v_j \CartesianUnitVectorIndexed[i] \eqq t_{1j} v_j\CartesianUnitVectorIndexed[1] t_{2j} v_j\CartesianUnitVectorIndexed[2] + t_{3j} v_j\CartesianUnitVectorIndexed[3] \textcolor{gray}{\quad \leftarrow i=1,2,3}\\
+																					\eqq 
+																					\begin{aligned}[t]
+																					&t_{11} v_1\CartesianUnitVectorIndexed[1] + t_{12} v_2\CartesianUnitVectorIndexed[1] + t_{13} v_3\CartesianUnitVectorIndexed[1] \textcolor{gray}{\quad \leftarrow i=1, j= 1,2,3}\\ 
+																					&+ t_{21} v_1\CartesianUnitVectorIndexed[2] + t_{22} v_2\CartesianUnitVectorIndexed[2] + t_{23} v_3\CartesianUnitVectorIndexed[2] \textcolor{gray}{\quad \leftarrow i=2, j= 1,2,3}\\
+																					&+ t_{31} v_1\CartesianUnitVectorIndexed[3] + t_{32} v_2\CartesianUnitVectorIndexed[3] + t_{33} v_3\CartesianUnitVectorIndexed[3] \textcolor{gray}{\quad \leftarrow i=3, j= 1,2,3}
+																					\end{aligned}
+\end{align}
+$$
+
+This applies to tensors in general, and not just to vectors. {==Expand this point?==}
+
+{==Worth noting?: ==} So far, we're not actually just talking about summation per se. In every case considered, there's a unit vector being multiplied by scalar coefficients. Not obvious whether and how the convention would extend to an expression like $t_{ij}s_j$. In general, the presence of the $\CartesianUnitVectorIndexed$ muddies the waters, no? 
+
+Because later we're going to use indicial notation to work with expressions like 
+
+
+
+#### Step 2: Free vs dummy indices
+
+
+
+#### Step 3: Manipulation rules
+
+
+
+
+
+
+
+Return to the 
+- Meaning: the quantity by which to scale the basis: Cartesian unit vectors $\CartesianUnitVectorsAll$
+- (How is this a map?)
+- Key features from example:
+- Really a sum:
+$$
+\TensorSymbolicPrintedBold(v) \eq v_1\CartesianUnitVectorIndexed[1] + v_2\CartesianUnitVectorIndexed[2] + v_3\CartesianUnitVectorIndexed[3] \eq \sum_{i=1}^{3} v_i\CartesianUnitVectorIndexed[i]
+$$
+
+- Can "transform from one basis (reference frame) to another" ... with something like no loss of information (?). Relative values remain the same? What is preserved if the component values are different?
+
+- encompass: scalars, vectors, matrices, and 
+
+
+
+
+### Tensor notation
+
+
+#### Tensor notation, indicial
+
+- Link Faculty of Khan videos?
+- Interactive expansion for intuition?
+- Rules
+
+
+

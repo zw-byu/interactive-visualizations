@@ -1,0 +1,311 @@
+---
+title: "Hughes Chapter 1: Math Clarifications"
+format: 
+  html:
+    css: styles.css
+theme: cosmo
+toc: false
+code-fold: false
+execute:
+  enabled: false
+page-layout: full
+---
+
+# 1D Change of Variables — Visual Walkthrough
+
+This interactive figure shows how a small interval in the **reference** coordinate $\xi \in [-1,1]$ (width $\Delta \xi$) maps to a small interval in the **physical** coordinate $x \in [x_1^e, x_2^e]$ (width $\Delta x = x_\xi \Delta \xi$) under the linear map
+$$
+x(\xi)=\frac{x_1^e+x_2^e}{2}+\frac{h}{2}\,\xi,\qquad h=x_2^e-x_1^e,\qquad x_\xi=\frac{dx}{d\xi}=\frac{h}{2}.
+$$
+The top panel plots \(f(x)\) and shades a thin strip of width $\Delta x$. The bottom panel shows the corresponding strip $\Delta \xi$ in the reference domain. The numeric readout verifies that
+$$
+\int_{x_1^e}^{x_2^e} f(x)\,dx \;=\; \int_{-1}^{1} f(x(\xi))\,x_\xi\,d\xi,
+$$
+and for a Riemann strip at $\xi_0$: $f(x(\xi_0))\,\Delta x = f(x(\xi_0))\,x_\xi\,\Delta \xi$.
+
+```{ojs}
+d3 = require("d3@7")
+//| echo: false
+```
+
+```{ojs}
+//| echo: false
+// Pretty labels but simple string values for the select (prevents [object Object] and key mismatches)
+labelFor = new Map([
+  ["const",  "constant (1)"],
+  ["linear", "linear (x)"],
+  ["quad",   "quadratic ((x − m)^2)"],
+  ["sine",   "sine (sin 2π·(x−x₁)/h)"]
+])
+
+viewof fx = Inputs.select(
+  ["const", "linear", "quad", "sine"],
+  {
+    label: "Function f(x):",
+    value: "sine",
+    format: d => labelFor.get(d)
+  }
+)
+
+viewof x1  = Inputs.range([0, 8],      { step: 0.1, value: 0,   label: "x₁" })
+viewof x2  = Inputs.range([2, 12],     { step: 0.1, value: 8,   label: "x₂ (must be > x₁)" })
+viewof xi0 = Inputs.range([-0.95,0.95],{ step: 0.01, value: 0,  label: "ξ₀ (strip start)" })
+viewof dxi = Inputs.range([0.01,0.8],  { step: 0.01, value: 0.1,label: "Δξ (strip width)" })
+```
+
+```{ojs}
+//| echo: false
+// Derived quantities and function definition bound to controls
+h   = Math.max(1e-9, x2 - x1)       // element length (guard against zero/negative)
+xm  = 0.5 * (x1 + x2)               // element midpoint
+x_of = ξ => xm + 0.5 * h * ξ        // affine map x(ξ)
+xξ  = 0.5 * h                       // Jacobian dx/dξ (constant for linear map)
+
+// Choose f by key; ensure this cell returns a callable function (prevents "f is not a function")
+f = new Map([
+  ["const",  (x) => 1],
+  ["linear", (x) => x],
+  ["quad",   (x) => (x - xm) ** 2],
+  ["sine",   (x) => Math.sin(2 * Math.PI * (x - x1) / h)]
+]).get(fx)
+
+// evaluation window for the plot
+xa = x1;  xb = x2;
+
+// strip endpoints in both coordinates
+ξa      = xi0
+ξb      = Math.min(1, ξa + dxi)
+xa_phys = x_of(ξa)
+xb_phys = x_of(ξb)
+Δξ      = ξb - ξa
+Δx      = xξ * Δξ
+
+```
+
+```{ojs}
+//| echo: false
+// Numeric readout (verifies Δx = xξ · Δξ, and the two equivalent strip areas)
+html`<div class="readout">
+  <div><b>Mapping:</b> x(ξ) = (x₁+x₂)/2 + (h/2)·ξ, with h = x₂ − x₁</div>
+  <div><b>Jacobian:</b> x<sub>ξ</sub> = h/2 = ${(xξ).toFixed(3)}</div>
+  <div><b>Strip:</b> ξ₀ = ${ξa.toFixed(3)}, Δξ = ${Δξ.toFixed(3)} → x₀ = ${xa_phys.toFixed(3)}, Δx = ${Δx.toFixed(3)}</div>
+  <div><b>Riemann rectangle areas:</b>
+    f(x(ξ₀))·Δx = ${(f(xa_phys)*Δx).toFixed(4)}
+    &nbsp; and &nbsp;
+    f(x(ξ₀))·x<sub>ξ</sub>·Δξ = ${(f(xa_phys)*xξ*Δξ).toFixed(4)}
+  </div>
+</div>`
+
+
+```
+
+```{ojs}
+//| echo: false
+// Main visualization
+{
+  const W  = Math.min(900, width || 900);
+  const tH = 260;   // top: function plot
+  const bH = 120;   // bottom: reference interval
+  const H  = tH + bH + 20;
+  const m  = { top: 24, right: 24, bottom: 28, left: 48 };
+
+  // Scales
+  const sx = d3.scaleLinear().domain([xa, xb]).range([m.left, W - m.right]);
+
+  // sample f to set a sensible vertical range
+  const samples = d3.range(0, 201).map(i => {
+    const x = xa + (i / 200) * (xb - xa);
+    return f(x);
+  });
+  const ymin = Math.min(...samples), ymax = Math.max(...samples);
+  const pad  = 0.1 * Math.max(1e-6, Math.abs(ymax - ymin));
+  const sy   = d3.scaleLinear().domain([ymin - pad, ymax + pad]).range([tH - m.bottom, m.top]);
+
+  // Reference (xi) scale
+  const sξ = d3.scaleLinear().domain([-1, 1]).range([m.left, W - m.right]);
+
+  // SVG
+  const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("class", "coviz");
+
+  // ----- TOP PANEL: f(x) and Δx strip -----
+  // axes
+  const xAxis = g => g
+    .attr("transform", `translate(0,${tH - m.bottom})`)
+    .call(d3.axisBottom(sx).ticks(8))
+    // Top (physical x) axis label
+    .call(g => g.append("text")
+      .attr("x", m.left)   // 30 px to the left of axis start
+      .attr("y", 35)
+      .attr("text-anchor", "start")
+      .attr("class", "axislabel")
+      .text("x (physical)"));
+
+  const yAxis = g => g
+    .attr("transform", `translate(${m.left},0)`)
+    .call(d3.axisLeft(sy).ticks(6))
+    .call(g => g.append("text")
+      .attr("x", 0).attr("y", m.top - 8).attr("text-anchor", "start")
+      .attr("class", "axislabel").text("f(x)"));
+
+  svg.append("g").call(xAxis);
+  svg.append("g").call(yAxis);
+
+  // function curve
+  const line = d3.line()
+    .x(x => sx(x))
+    .y(x => sy(f(x)));
+
+  svg.append("path")
+    .datum(d3.range(0, 401).map(i => xa + (i / 400) * (xb - xa)))
+    .attr("d", line)
+    .attr("class", "curve");
+
+  // shaded Δx strip (under curve)
+  const xaP = xa_phys, xbP = xb_phys;
+
+  const stripPath = d3.path();
+  stripPath.moveTo(sx(xaP), sy(sy.domain()[0]));
+  stripPath.lineTo(sx(xaP), sy(f(xaP)));
+  stripPath.lineTo(sx(xbP), sy(f(xbP)));
+  stripPath.lineTo(sx(xbP), sy(sy.domain()[0]));
+  stripPath.closePath();
+
+  svg.append("path")
+    .attr("d", stripPath.toString())
+    .attr("class", "fill-strip");
+
+  // Riemann rectangle at x(ξ₀) of height f(x(ξ₀))
+  const rectX    = sx(xaP);
+  const rectW    = Math.max(0.5, sx(xaP + Δx) - sx(xaP));
+  const rectYTop = sy(f(xaP));
+  const rectYBase= sy(0);
+  const rectH    = Math.max(1, Math.abs(rectYBase - rectYTop));
+
+  svg.append("rect")
+    .attr("x", rectX)
+    .attr("y", Math.min(rectYTop, rectYBase))
+    .attr("width", rectW)
+    .attr("height", rectH)
+    .attr("class", "riemann");
+
+  // guide lines down from xaP and xbP to bottom panel
+  const guideYTop = tH - m.bottom + 4;
+  const guideYBot = tH + 20 + 16;
+  svg.append("line").attr("x1", sx(xaP)).attr("y1", guideYTop).attr("x2", sx(xaP)).attr("y2", guideYBot).attr("class", "guide");
+  svg.append("line").attr("x1", sx(xbP)).attr("y1", guideYTop).attr("x2", sx(xbP)).attr("y2", guideYBot).attr("class", "guide");
+
+  // bracket & label for Δx
+  const by = m.top + 8;
+  const leftX = sx(xaP), rightX = sx(xbP);
+  svg.append("path")
+    .attr("d", `M ${leftX} ${by} v -8 M ${leftX} ${by-8} H ${rightX} M ${rightX} ${by} v -8`)
+    .attr("class", "bracket");
+  svg.append("text")
+    .attr("x", 0.5*(leftX+rightX)).attr("y", by-14).attr("text-anchor","middle")
+    .attr("class", "bracketlabel")
+    .text(`Δx = ${Δx.toFixed(3)} = xξ·Δξ`);
+
+  // connector labels
+  // svg.append("text")
+  //   .attr("x", sx(xaP)).attr("y", guideYTop - 6).attr("text-anchor","middle")
+  //   .attr("class","connectorlabel").text("x(ξ₀)");
+  // svg.append("text")
+  //   .attr("x", sx(xbP)).attr("y", guideYTop - 6).attr("text-anchor","middle")
+  //   .attr("class","connectorlabel").text("x(ξ₀+Δξ)");
+
+// pad so labels sit just outside the strip
+const labelPad = 6;
+
+  // Start label: anchor right, text to the LEFT of the start
+  svg.append("text")
+    .attr("x", sx(xaP) - labelPad)
+    .attr("y", guideYTop - 6)
+    .attr("text-anchor", "end")
+    .attr("class", "connectorlabel")
+    .text("x(ξ₀)");
+
+  // End label: anchor left, text to the RIGHT of the end
+  svg.append("text")
+    .attr("x", sx(xbP) + labelPad)
+    .attr("y", guideYTop - 6)
+    .attr("text-anchor", "start")
+    .attr("class", "connectorlabel")
+    .text("x(ξ₀+Δξ)");
+
+  // ----- BOTTOM PANEL: reference interval and Δξ strip -----
+  const y0 = tH + 70;
+
+  // axis line
+  svg.append("line")
+    .attr("x1", sξ(-1)).attr("x2", sξ(1))
+    .attr("y1", y0 + 40).attr("y2", y0 + 40)
+    .attr("class", "axisline");
+
+  // ticks at -1, 0, 1
+  [-1, 0, 1].forEach(t => {
+    svg.append("line")
+      .attr("x1", sξ(t)).attr("x2", sξ(t))
+      .attr("y1", y0 + 34).attr("y2", y0 + 46)
+      .attr("class", "tick");
+    svg.append("text")
+      .attr("x", sξ(t)).attr("y", y0 + 64)
+      .attr("text-anchor", "middle")
+      .attr("class", "ticklabel").text(t === -1 ? "−1" : t === 1 ? "1" : "0");
+  });
+
+  // svg.append("text")
+  //   .attr("x", W - m.right).attr("y", y0 + 64)
+  //   .attr("text-anchor", "end").attr("class", "axislabel")
+  //   .text("ξ (reference)");
+
+  svg.append("text")
+    .attr("x", m.left)
+    .attr("y", y0 + 24)
+    .attr("text-anchor", "start")
+    .attr("class", "axislabel")
+    .text("ξ (reference)");
+
+  // Δξ strip
+  svg.append("rect")
+    .attr("x", sξ(ξa))
+    .attr("y", y0 + 28)
+    .attr("width", Math.max(1, sξ(ξb) - sξ(ξa)))
+    .attr("height", 24)
+    .attr("class", "fill-strip-ref");
+
+  // bracket & label for Δξ
+  svg.append("path")
+    .attr("d", `M ${sξ(ξa)} ${y0+20} v -8 M ${sξ(ξa)} ${y0+12} H ${sξ(ξb)} M ${sξ(ξb)} ${y0+20} v -8`)
+    .attr("class", "bracket");
+  svg.append("text")
+    .attr("x", 0.5*(sξ(ξa)+sξ(ξb))).attr("y", y0+6).attr("text-anchor","middle")
+    .attr("class", "bracketlabel")
+    .text(`Δξ = ${Δξ.toFixed(3)}`);
+
+  return svg.node();
+}
+
+```
+
+```{ojs}
+//| echo: false
+// Inline styles (works alongside your styles.css)
+html`<style>
+.coviz { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; }
+.coviz .curve { fill: none; stroke: #333; stroke-width: 2; }
+.coviz .fill-strip { fill: rgba(80, 160, 255, 0.20); stroke: rgba(80,160,255,0.8); }
+.coviz .fill-strip-ref { fill: rgba(255, 140, 80, 0.20); stroke: rgba(255,140,80,0.8); }
+.coviz .riemann { fill: rgba(40,40,40,0.12); stroke: rgba(40,40,40,0.5); }
+.coviz .guide { stroke: #888; stroke-dasharray: 4 4; }
+.coviz .axisline { stroke: #333; stroke-width: 1.5; }
+.coviz .tick { stroke: #333; }
+.coviz .axislabel { font-size: 12px; fill: #333; }
+.coviz .ticklabel { font-size: 12px; fill: #333; }
+.coviz .bracket { stroke: #333; fill: none; }
+.coviz .bracketlabel { font-size: 12px; fill: #333; }
+.readout { margin: .25rem 0 .75rem 0; font-size: .95rem; line-height: 1.3; }
+.connectorlabel { font-size: 11px; fill: #333; }
+</style>`
+
+```
+

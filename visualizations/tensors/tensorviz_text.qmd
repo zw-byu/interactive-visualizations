@@ -1,0 +1,93 @@
+```{python}
+#|echo: false
+import plotly.graph_objects as go
+import numpy as np
+
+def plot_4th_order_tensor(block_count=2):
+    fig = go.Figure()
+    spacing = 1.2
+    center = spacing / 2
+    block_spacing = 5.0  # space between blocks along x₁ direction
+
+    def compute_depth_cue(x, y, z):
+        max_depth = 3 * spacing
+        norm = 1 - z / max_depth
+        size = 12 + 6 * norm
+        alpha = 0.2 + 0.6 * norm
+        return size, alpha
+
+    for l in range(block_count):
+        # Reverse block order so Block 1 is left
+        x_offset = (block_count - 1 - l) * block_spacing
+
+        for i in range(3):      # x₁
+            for j in range(3):  # x₂
+                for k in range(3):  # x₃
+                    # Reverse x and y for visual orientation
+                    x_index = 2 - i
+                    y_index = 2 - j
+                    z_index = k
+
+                    x = x_index * spacing + center + x_offset
+                    y = y_index * spacing + center
+                    z = z_index * spacing + center
+
+                    label = f"n{i+1}{j+1}{k+1}{l+1}"
+                    font_size, alpha = compute_depth_cue(x, y, z)
+
+                    # Dot behind text
+                    fig.add_trace(go.Scatter3d(
+                        x=[x], y=[y], z=[z],
+                        mode='markers',
+                        marker=dict(size=6, color=f'rgba(0, 0, 0, {alpha})'),
+                        hoverinfo='skip',
+                        showlegend=False
+                    ))
+
+                    # Label text
+                    fig.add_trace(go.Scatter3d(
+                        x=[x], y=[y], z=[z],
+                        mode='text',
+                        text=[label],
+                        textfont=dict(size=font_size, color='black'),
+                        hoverinfo='skip',
+                        showlegend=False
+                    ))
+
+        # Wireframe
+        def add_wire_lines():
+            lines = []
+            for i in range(4):
+                for j in range(4):
+                    lines.append(((i, j, 0), (i, j, 3)))
+                    lines.append(((i, 0, j), (i, 3, j)))
+                    lines.append(((0, i, j), (3, i, j)))
+            return lines
+
+        for start, end in add_wire_lines():
+            x0, y0, z0 = [s * spacing for s in start]
+            x1, y1, z1 = [e * spacing for e in end]
+            x0 += x_offset
+            x1 += x_offset
+            fig.add_trace(go.Scatter3d(
+                x=[x0, x1], y=[y0, y1], z=[z0, z1],
+                mode='lines',
+                line=dict(color='lightgray', width=2),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+    # Scene configuration
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(title='x₁', showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(title='x₂', showgrid=False, zeroline=False, showticklabels=False),
+            zaxis=dict(title='x₃', showgrid=False, zeroline=False, showticklabels=False),
+            aspectmode='data',
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.0))
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+    )
+
+    fig.show()
+```
